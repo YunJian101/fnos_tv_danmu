@@ -1,7 +1,7 @@
 {
-    "versionCode": 999,
-    "versionName": "9.9.9",
-    "apkUrl": "https://example.com/test.apk",
-    "changelog": "1. 演示用更新日志第一行\n2. 演示用更新日志第二行\n3. 演示用更新日志第三行",
+    "versionCode": 137,
+    "versionName": "3.2.1",
+    "apkUrl": "https://github.com/YunJian101/fnos_tv_danmu/releases/download/v3.2.1/FNTV_release_v3.2.1.apk",
+    "changelog": "1. 更新弹窗改为自绘样式\n2. 图片与接口磁盘缓存\n3. 设置内查看/清除缓存\n4. 返回首页不跳顶不闪烁",
     "forceUpdate": false
 }
