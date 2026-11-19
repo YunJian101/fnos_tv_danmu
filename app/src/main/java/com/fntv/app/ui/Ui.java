@@ -530,8 +530,10 @@ public final class Ui {
         col.setOrientation(LinearLayout.VERTICAL);
 
         FrameLayout thumbWrap = new FrameLayout(c);
+        // 缩略图严格按 16:9 计算高度（宽度 = 卡片宽 - 左右内边距），避免比例偏差
+        final int thumbW = dp(c, wDp) - dp(c, 12);
         thumbWrap.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(c, hDp)));
+                ViewGroup.LayoutParams.MATCH_PARENT, (int) (thumbW * 9f / 16f)));
 
         thumbWrap.addView(posterBox(c, imgUrl, title, INNER_RADIUS),
                 new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,

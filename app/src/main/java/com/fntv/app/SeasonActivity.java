@@ -101,6 +101,8 @@ public class SeasonActivity extends AppCompatActivity {
 
     private void loadEpisodes() {
         if (seasonGuid == null) return;
+        episodeContainer.removeAllViews();
+        for (int i = 0; i < 6; i++) episodeContainer.addView(skeletonRow());
         api.getApi().getEpisodeList(seasonGuid).enqueue(new Callback<ApiResponse<List<PlayListItem>>>() {
             @Override
             public void onResponse(Call<ApiResponse<List<PlayListItem>>> call,
@@ -115,9 +117,29 @@ public class SeasonActivity extends AppCompatActivity {
                 }
                 List<PlayListItem> eps = response.body().data;
                 subView.setText("共 " + eps.size() + " 集");
-                for (PlayListItem ep : eps) {
-                    episodeContainer.addView(episodeRow(ep));
+                // 窗口化渲染：全部位置先用等高占位撑住，只有可见范围 ±6 行才真正构建
+                pendingEps = eps;
+                if (episodeScroll == null) episodeScroll = findScroll(episodeContainer);
+                episodeContainer.removeAllViews();
+                slots.clear();
+                realRows.clear();
+                int rowH = Ui.dp(SeasonActivity.this, 170);
+                for (int i = 0; i < eps.size(); i++) {
+                    FrameLayout slot = new FrameLayout(SeasonActivity.this);
+                    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, rowH);
+                    lp.bottomMargin = Ui.dp(SeasonActivity.this, 14);
+                    slot.setLayoutParams(lp);
+                    episodeContainer.addView(slot);
+                    slots.add(slot);
                 }
+                materializeAround(0);
+                episodeScroll.setOnScrollChangeListener(new View.OnScrollChangeListener() {
+                    @Override public void onScrollChange(View v, int sx, int sy, int ox, int oy) {
+                        int first = sy / Ui.dp(SeasonActivity.this, 184);
+                        materializeAround(first);
+                    }
+                });
             }
 
             @Override
@@ -127,6 +149,92 @@ public class SeasonActivity extends AppCompatActivity {
                         15, R.color.ui_text3, false));
             }
         });
+    }
+
+    private List<PlayListItem> pendingEps;
+    private final java.util.List<FrameLayout> slots = new java.util.ArrayList<>();
+    private final java.util.Map<Integer, View> realRows = new java.util.HashMap<>();
+    private android.widget.ScrollView episodeScroll;
+
+    private android.widget.ScrollView findScroll(android.view.View v) {
+        while (v != null) {
+            if (v instanceof android.widget.ScrollView) return (android.widget.ScrollView) v;
+            v = (v.getParent() instanceof android.view.View) ? (android.view.View) v.getParent() : null;
+        }
+        return null;
+    }
+
+    /** 只构建可见范围 ±6 行，其余保持占位 */
+    private void materializeAround(int firstVisible) {
+        if (pendingEps == null) return;
+        int from = Math.max(0, firstVisible - 12);
+        int to = Math.min(pendingEps.size() - 1, firstVisible + 12);
+        for (int i = from; i <= to; i++) {
+            if (realRows.containsKey(i)) continue;
+            FrameLayout slot = slots.get(i);
+            View row = episodeRow(pendingEps.get(i));
+            slot.removeAllViews();
+            slot.addView(row, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            realRows.put(i, row);
+        }
+    }
+    private int renderedIdx = 0;
+
+    private void renderChunk(int count) {
+        if (pendingEps == null) return;
+        int end = Math.min(renderedIdx + count, pendingEps.size());
+        for (int i = renderedIdx; i < end; i++) {
+            episodeContainer.addView(episodeRow(pendingEps.get(i)));
+        }
+        renderedIdx = end;
+    }
+
+    private void scheduleNextChunk() {
+        if (pendingEps == null || renderedIdx >= pendingEps.size()) return;
+        episodeContainer.postDelayed(new Runnable() {
+            @Override public void run() {
+                if (isFinishing()) return;
+                renderChunk(16);
+                scheduleNextChunk();
+            }
+        }, 16);
+    }
+
+    /** 加载占位行：灰块 + 两行灰条，接口回来前先撑住版面 */
+    private View skeletonRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(Ui.dp(this, 10), Ui.dp(this, 12), Ui.dp(this, 10), Ui.dp(this, 12));
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rlp.bottomMargin = Ui.dp(this, 14);
+        row.setLayoutParams(rlp);
+
+        View thumb = new View(this);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(Ui.dp(this, 240), Ui.dp(this, 135));
+        thumb.setLayoutParams(tlp);
+        thumb.setBackground(com.fntv.app.ui.Ui.round(0xFF2A3140, Ui.dp(this, 12)));
+        thumb.setAlpha(0.35f);
+        row.addView(thumb);
+
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        clp.leftMargin = Ui.dp(this, 18);
+        col.setLayoutParams(clp);
+        for (int k = 0; k < 2; k++) {
+            View line = new View(this);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    k == 0 ? Ui.dp(this, 320) : Ui.dp(this, 500), Ui.dp(this, k == 0 ? 22 : 16));
+            lp.topMargin = k == 0 ? 0 : Ui.dp(this, 12);
+            line.setLayoutParams(lp);
+            line.setBackground(com.fntv.app.ui.Ui.round(0xFF2A3140, Ui.dp(this, 6)));
+            line.setAlpha(0.35f);
+            col.addView(line);
+        }
+        row.addView(col);
+        return row;
     }
 
     /** 一行一集：左缩略图，右标题/时长/简介（对齐网页端排版） */

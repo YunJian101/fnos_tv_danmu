@@ -77,7 +77,9 @@ public class PlayerActivity extends AppCompatActivity {
     private long backPressedTime = 0;
     private CloudStreamManager cloudStreamManager;
     private boolean useHls = false;
-    private int seekStep = 10000;
+    private int seekStep = 10000;        // 兼容旧配置
+    private int seekFwd = 10000;         // 快进
+    private int seekBack = 10000;        // 快退
     private int bufferTimeMs = 30000;
     private int streamBitrate = 0; // bps 来自 stream API
     private Runnable seekCommitR;
@@ -171,6 +173,8 @@ public class PlayerActivity extends AppCompatActivity {
 
         SharedPreferences sp = getSharedPreferences("fntv_prefs", MODE_PRIVATE);
         seekStep = sp.getInt("seek_step", 10) * 1000;
+        seekFwd = sp.getInt("seek_step_fwd", sp.getInt("seek_step", 10)) * 1000;
+        seekBack = sp.getInt("seek_step_back", sp.getInt("seek_step", 10)) * 1000;
         bufferTimeMs = sp.getInt("buffer_time", 30) * 1000;
 
         initPlayer();
@@ -267,10 +271,10 @@ public class PlayerActivity extends AppCompatActivity {
         }, btnEpisodeList, btnNextEp);
 
         btnPlayPause.setOnClickListener(v -> togglePlay());
-        btnRewind.setOnClickListener(v -> seekRel(-seekStep));
-        btnForward.setOnClickListener(v -> seekRel(seekStep));
-        btnRewind.setContentDescription("-" + (seekStep / 1000) + "秒");
-        btnForward.setContentDescription("+" + (seekStep / 1000) + "秒");
+        btnRewind.setOnClickListener(v -> seekRel(-seekBack));
+        btnForward.setOnClickListener(v -> seekRel(seekFwd));
+        btnRewind.setContentDescription("-" + (seekBack / 1000) + "秒");
+        btnForward.setContentDescription("+" + (seekFwd / 1000) + "秒");
         btnSpeed.setOnClickListener(v -> cycleSpeed());
         btnRatio.setOnClickListener(v -> cycleRatio());
         btnInfo.setOnClickListener(v -> toggleInfo());
@@ -1771,9 +1775,8 @@ public class PlayerActivity extends AppCompatActivity {
             }
             return true;
         }
-        // 控制栏收起时，任何一个方向键先把控制栏叫出来，别让遥控器像失灵
-        if (!ctrlVis && (k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT
-                || k == KeyEvent.KEYCODE_DPAD_UP || k == KeyEvent.KEYCODE_DPAD_DOWN
+        // 控制栏收起时：左右键直接快退/快进（下方逻辑处理），只有上下/确定才唤出控制栏
+        if (!ctrlVis && (k == KeyEvent.KEYCODE_DPAD_UP || k == KeyEvent.KEYCODE_DPAD_DOWN
                 || k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER)) {
             showCtrl(true);
             return true;
@@ -1818,7 +1821,7 @@ public class PlayerActivity extends AppCompatActivity {
                     return true;
                 case KeyEvent.KEYCODE_DPAD_LEFT:
                 case KeyEvent.KEYCODE_DPAD_RIGHT: {
-                    long step = k == KeyEvent.KEYCODE_DPAD_LEFT ? -seekStep : seekStep;
+                    long step = k == KeyEvent.KEYCODE_DPAD_LEFT ? -seekBack : seekFwd;
                     long cur = pendingSeekMs >= 0 ? pendingSeekMs : (player != null ? player.getCurrentPosition() : 0);
                     long dur = player != null ? player.getDuration() : 0;
                     long target = Math.max(0, Math.min(dur, cur + step));

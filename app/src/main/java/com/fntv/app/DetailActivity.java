@@ -64,7 +64,9 @@ public class DetailActivity extends AppCompatActivity {
     private String airDate;
     private boolean firstResume = true;
     private String continueSig = null;   // 继续观看数据指纹，未变化就不重绘
-    private String seasonPoster;   // 季封面（/item/{季guid}.posters）
+    private String seasonPoster;   // 当前季封面（/item/{季guid}.posters）
+    private final java.util.Map<String, String> seasonPosters = new java.util.HashMap<>();   // 每季各自的封面
+    private final java.util.Map<String, String> seasonBackdrops = new java.util.HashMap<>(); // 每季各自的背景
     private String seriesArtwork;  // 剧集大图（/item/{剧集guid}.backdrops 优先）
     private PlayListItem resumeItem;
     private TextView playBtn;
@@ -469,8 +471,9 @@ public class DetailActivity extends AppCompatActivity {
     }
 
     /** 季封面与剧集大图：按季 guid 取 posters，再按剧集 guid 取 backdrops */
-    private void loadArtwork(String seasonGuid) {
+    private void loadArtwork(final String seasonGuid) {
         if (seasonGuid == null || seasonGuid.isEmpty()) return;
+        final String seasonGuidForArt = seasonGuid;
         api.getApi().getItemInfo(seasonGuid).enqueue(new Callback<ApiResponse<ItemInfoData>>() {
             @Override
             public void onResponse(Call<ApiResponse<ItemInfoData>> call,
@@ -480,6 +483,7 @@ public class DetailActivity extends AppCompatActivity {
                 ItemInfoData d = response.body().data;
                 if (d.posters != null && !d.posters.isEmpty()) {
                     seasonPoster = d.posters;
+                    if (seasonGuidForArt != null && d.posters != null) seasonPosters.put(seasonGuidForArt, d.posters);
                     if (!seasons.isEmpty()) renderSeasons();
                 }
                 String seriesGuid = d.parentGuid;
@@ -810,7 +814,8 @@ public class DetailActivity extends AppCompatActivity {
             if (s.airDate != null && s.airDate.length() >= 4) {
                 sub = sub.isEmpty() ? s.airDate.substring(0, 4) : sub + " · " + s.airDate.substring(0, 4);
             }
-            String cover = seasonPoster != null ? seasonPoster : poster;
+            String own = s.guid != null ? seasonPosters.get(s.guid) : null;
+            String cover = own != null ? own : (seasonPoster != null ? seasonPoster : poster);
             String badge = s.numberOfEpisodes > 0 ? String.valueOf(s.numberOfEpisodes) : null;
             View card = Ui.posterCard(this, "第 " + num + " 季", sub,
                     Ui.posterUrl(baseUrl, cover), badge, null, 150, 214,
@@ -822,6 +827,7 @@ public class DetailActivity extends AppCompatActivity {
             row.addView(card);
         }
         seasonSection.addView(Ui.rail(this, row));
+        if (seasons.size() > 1) prefetchSeasonArt(0);
         updatePlayButton();
     }
 
@@ -833,10 +839,39 @@ public class DetailActivity extends AppCompatActivity {
         i.putExtra("season_title", "第 " + num + " 季");
         i.putExtra("series_title", displayTitle());
         i.putExtra("overview", overview);
-        i.putExtra("backdrop", seriesArtwork != null ? seriesArtwork : (seasonPoster != null ? seasonPoster : poster));
+        String ownBd = s.guid != null ? seasonBackdrops.get(s.guid) : null;
+        i.putExtra("backdrop", ownBd != null ? ownBd
+                : (seriesArtwork != null ? seriesArtwork : (seasonPoster != null ? seasonPoster : poster)));
         i.putExtra("category", category);
         if (parentGuid != null) i.putExtra("parent_guid", parentGuid);
         startActivity(i);
+    }
+
+    /** 为每一季预取各自的封面与背景（多季剧集的关键） */
+    private void prefetchSeasonArt(int index) {
+        if (index >= seasons.size()) return;
+        PlayListItem s = seasons.get(index);
+        if (s.guid == null) { prefetchSeasonArt(index + 1); return; }
+        if (seasonPosters.containsKey(s.guid)) { prefetchSeasonArt(index + 1); return; }
+        api.getApi().getItemInfo(s.guid).enqueue(new Callback<ApiResponse<ItemInfoData>>() {
+            @Override
+            public void onResponse(Call<ApiResponse<ItemInfoData>> call,
+                                   Response<ApiResponse<ItemInfoData>> response) {
+                if (response.isSuccessful() && response.body() != null
+                        && response.body().code == 0 && response.body().data != null) {
+                    ItemInfoData d = response.body().data;
+                    if (d.posters != null) seasonPosters.put(s.guid, d.posters);
+                    if (d.backdrops != null) seasonBackdrops.put(s.guid, d.backdrops);
+                    renderSeasons();
+                }
+                prefetchSeasonArt(index + 1);
+            }
+
+            @Override
+            public void onFailure(Call<ApiResponse<ItemInfoData>> call, Throwable t) {
+                prefetchSeasonArt(index + 1);
+            }
+        });
     }
 
     /** 演职人员 */

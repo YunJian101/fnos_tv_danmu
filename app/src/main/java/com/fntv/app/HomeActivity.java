@@ -165,7 +165,10 @@ public class HomeActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (currentTab == 0 && !rails.isEmpty()) loadContinue();
+        // 回到首页必须拿最新的播放记录，否则「继续观看」是旧的
+        com.fntv.app.api.FnApiManager.invalidateApi("/play/list");
+        com.fntv.app.api.FnApiManager.invalidateApi("/play/info");
+        loadContinue();
         userTouched = false;
         restorePosition();
     }
@@ -464,6 +467,22 @@ public class HomeActivity extends AppCompatActivity {
         }
     }
 
+    /** 分类行分批追加：每次一行，避免一次性造上百个卡片卡住主线程 */
+    private void appendRailsChunked(final java.util.List<MediaDbItem> libs, final int index) {
+        if (index >= libs.size()) return;
+        homeContainer.postDelayed(new Runnable() {
+            @Override public void run() {
+                if (isFinishing() || currentTab != 0) return;
+                MediaDbItem lib = libs.get(index);
+                List<PlayListItem> items = rails.get(lib.guid);
+                if (items != null && !items.isEmpty()) {
+                    addRail(lib.title == null ? "媒体库" : lib.title, items, lib);
+                }
+                appendRailsChunked(libs, index + 1);
+            }
+        }, index == 0 ? 0 : 16);
+    }
+
     private LinearLayout continueRowView;
 
     private View makeContinueCard(final PlayListItem it) {
@@ -472,13 +491,14 @@ public class HomeActivity extends AppCompatActivity {
         String badge = remain > 0 ? Ui.remainingText(remain) : "未开始";
         String sub = it.duration > 0 ? Ui.formatDuration(it.duration) : subOf(it);
         View card = Ui.wideCard(this, it.getDisplayTitle(), sub,
-                Ui.posterUrl(baseUrl, it.poster), badge, pct, 300, 169,
+                Ui.posterUrl(baseUrl, it.poster), badge, pct, 320, 180,
                 new View.OnClickListener() {
                     @Override public void onClick(View v) { openDetail(it); }
                 });
         if (it.guid != null) card.setTag("fntv_guid:" + it.guid);
+        // 卡片固定宽度：宽度若由内容反推，缩略图按 320dp 算高度就会失真
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                Ui.dp(this, 320), LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.rightMargin = Ui.dp(this, 14);
         card.setLayoutParams(lp);
         return card;
@@ -661,6 +681,43 @@ public class HomeActivity extends AppCompatActivity {
         }
         Ui.grid(this, libraryContainer, cards, 170, 14);
         focusFirst(cards);
+    }
+
+    /** 分批构建媒体库网格：每次追加 rowsPerChunk 行 */
+    private void gridChunked(final java.util.List<View> cards, final int startRow, final int rowsPerChunk) {
+        int widthDp = getResources().getConfiguration().screenWidthDp;
+        int cols = Math.max(3, widthDp / 170);
+        final int start = startRow * cols;
+        if (start >= cards.size()) return;
+        final int end = Math.min(start + cols * rowsPerChunk, cards.size());
+        if (startRow == 0) libraryContainer.removeAllViews();
+        for (int i = start; i < end; i += cols) {
+            LinearLayout line = new LinearLayout(this);
+            line.setOrientation(LinearLayout.HORIZONTAL);
+            line.setClipChildren(false);
+            line.setClipToPadding(false);
+            LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            llp.bottomMargin = Ui.dp(this, 14);
+            line.setLayoutParams(llp);
+            for (int j = 0; j < cols; j++) {
+                int idx = i + j;
+                if (idx >= cards.size()) break;
+                View card = cards.get(idx);
+                if (card.getParent() instanceof android.view.ViewGroup) {
+                    ((android.view.ViewGroup) card.getParent()).removeView(card);
+                }
+                line.addView(card);
+            }
+            libraryContainer.addView(line);
+        }
+        if (end < cards.size()) {
+            libraryContainer.postDelayed(new Runnable() {
+                @Override public void run() {
+                    if (currentTab == 1) gridChunked(cards, startRow + rowsPerChunk, rowsPerChunk);
+                }
+            }, 16);
+        }
     }
 
     /** 网格渲染完把焦点交给第一张卡片，遥控器直接能上下左右走 */
@@ -871,14 +928,27 @@ public class HomeActivity extends AppCompatActivity {
                     }
                 })));
 
-        int step = prefs.getInt("seek_step", 10);
-        int stepIdx = step == 15 ? 1 : (step == 30 ? 2 : 0);
-        play.addView(settingLine("快进步长", "遥控器左右键单次跳转的秒数",
-                pills(new String[]{"10 秒", "15 秒", "30 秒"}, stepIdx, new OnPick() {
+        // 快进 / 快退 分开设置
+        final int[] STEP_VALS = {5, 10, 15, 30, 60};
+        int fwd = prefs.getInt("seek_step_fwd", prefs.getInt("seek_step", 10));
+        int back = prefs.getInt("seek_step_back", prefs.getInt("seek_step", 10));
+        int fwdIdx = 1, backIdx = 1;
+        for (int i = 0; i < STEP_VALS.length; i++) {
+            if (STEP_VALS[i] == fwd) fwdIdx = i;
+            if (STEP_VALS[i] == back) backIdx = i;
+        }
+        play.addView(settingLine("快进秒数", "遥控器右键单次前进多少秒",
+                pills(new String[]{"5 秒", "10 秒", "15 秒", "30 秒", "60 秒"}, fwdIdx, new OnPick() {
                     @Override
                     public void onPick(int index) {
-                        prefs.edit().putInt("seek_step",
-                                index == 0 ? 10 : (index == 1 ? 15 : 30)).apply();
+                        prefs.edit().putInt("seek_step_fwd", STEP_VALS[index]).apply();
+                    }
+                })));
+        play.addView(settingLine("快退秒数", "遥控器左键单次后退多少秒",
+                pills(new String[]{"5 秒", "10 秒", "15 秒", "30 秒", "60 秒"}, backIdx, new OnPick() {
+                    @Override
+                    public void onPick(int index) {
+                        prefs.edit().putInt("seek_step_back", STEP_VALS[index]).apply();
                     }
                 })));
 

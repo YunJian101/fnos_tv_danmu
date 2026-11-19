@@ -18,16 +18,21 @@ public class FnApiManager {
     private static final HostnameVerifier TRUST_ALL_HOSTS = (hostname, session) -> true;
 
     /** 接口内存缓存：同一个请求只发一次，一直到 App 退出（或主动失效） */
+    private static final java.util.Map<String, Long> RESP_TIME =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
     private static final java.util.Map<String, String> RESP_CACHE =
             new java.util.concurrent.ConcurrentHashMap<>();
 
     public static void invalidateApi(String contains) {
         if (contains == null) return;
         RESP_CACHE.keySet().removeIf(k -> k.contains(contains));
+        RESP_TIME.keySet().removeIf(k -> k.contains(contains));
     }
 
     public static void clearApiCache() {
         RESP_CACHE.clear();
+        RESP_TIME.clear();
     }
 
     private static java.io.File apiDir = null;
@@ -143,6 +148,15 @@ public class FnApiManager {
             String key = req.method() + " " + req.url().toString() + " " + body;
             if (skipCache) return chain.proceed(req);
             String cached = RESP_CACHE.get(key);
+            // 内存缓存也按接口 TTL 过期，否则整个进程内永远不会再请求
+            if (cached != null) {
+                Long ts = RESP_TIME.get(key);
+                if (ts == null || System.currentTimeMillis() - ts > ttlOf(req.url().encodedPath()) * 1000L) {
+                    RESP_CACHE.remove(key);
+                    RESP_TIME.remove(key);
+                    cached = null;
+                }
+            }
             String path0 = req.url().encodedPath();
             if (cached == null) {
                 cached = readDisk(key, path0);   // 进程重启后仍能秒开
