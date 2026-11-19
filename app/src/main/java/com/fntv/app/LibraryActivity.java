@@ -364,7 +364,7 @@ public class LibraryActivity extends AppCompatActivity {
                     ((ViewGroup) card.getParent()).removeView(card);
                 }
                 LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
-                        Ui.dp(this, 150), ViewGroup.LayoutParams.WRAP_CONTENT);
+                        Ui.dp(this, isLive ? 260 : 150), ViewGroup.LayoutParams.WRAP_CONTENT);
                 clp.rightMargin = Ui.dp(this, 18);
                 card.setLayoutParams(clp);
                 line.addView(card);

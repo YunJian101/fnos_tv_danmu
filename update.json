@@ -1,7 +1,7 @@
 {
-    "versionCode": 208,
-    "versionName": "3.9.5",
-    "apkUrl": "https://github.com/YunJian101/fnos_tv_danmu/releases/download/v3.9.5/FNTV_release_v3.9.5.apk",
-    "changelog": "1. 首页分类行骨架屏，不再整页重建\n2. 分类行请求量减到 20 条，加载更快\n3. 播放器硬/软解开关（仅本次播放）\n4. 起播前硬件能力预检，超规格自动转码\n5. 转码参数修正与音频降级优化",
+    "versionCode": 209,
+    "versionName": "3.9.6",
+    "apkUrl": "https://github.com/YunJian101/fnos_tv_danmu/releases/download/v3.9.6/FNTV_release_v3.9.6.apk",
+    "changelog": "1. 缩略图强制 16:9（按实际渲染宽度计算）\n2. 直播宽幅卡不再被压成方形\n3. 首页分类行骨架屏与增量插入\n4. 播放器硬/软解开关与转码修正",
     "forceUpdate": false
 }
