@@ -149,23 +149,59 @@ public class UpdateManager {
     private void showUpdateDialog(final String title, final String changelog,
                                    final boolean forceUpdate, final String apkUrl,
                                    final int remoteVersion, final boolean isTestInstall) {
-        new android.app.AlertDialog.Builder(activity)
-                .setTitle(title)
-                .setMessage(changelog)
-                .setCancelable(!forceUpdate)
-                .setPositiveButton(isTestInstall ? "测试安装器" : "立即更新", (dialog, which) -> {
-                    dialog.dismiss();
-                    downloadAndInstall(apkUrl, remoteVersion, isTestInstall);
-                })
-                .setNegativeButton(forceUpdate ? "退出应用" : "稍后再说", (dialog, which) -> {
-                    if (forceUpdate) {
-                        activity.finishAffinity();
-                    } else {
-                        dialog.dismiss();
-                        resetBtn();
-                    }
-                })
-                .show();
+        // 自绘弹窗：与 App 其他弹窗同一套卡片样式，跟随主题
+        android.widget.LinearLayout body = new android.widget.LinearLayout(activity);
+        body.setOrientation(android.widget.LinearLayout.VERTICAL);
+
+        android.widget.TextView tv = new android.widget.TextView(activity);
+        tv.setText(changelog == null ? "" : changelog);
+        tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
+        tv.setLineSpacing(com.fntv.app.ui.Ui.dp(activity, 5), 1f);
+        tv.setTextColor(com.fntv.app.ui.Ui.color(activity, com.fntv.app.R.color.ui_text2));
+        body.addView(tv);
+
+        final android.app.Dialog[] holder = new android.app.Dialog[1];
+        final android.app.Dialog dlg = com.fntv.app.ui.Ui.dialog(activity, title, body, null, null, null);
+        holder[0] = dlg;
+
+        android.widget.LinearLayout btns = new android.widget.LinearLayout(activity);
+        btns.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        btns.setGravity(android.view.Gravity.END);
+        android.widget.LinearLayout.LayoutParams blp = new android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        blp.topMargin = com.fntv.app.ui.Ui.dp(activity, 16);
+        btns.setLayoutParams(blp);
+
+        android.widget.TextView later = com.fntv.app.ui.Ui.ghostButton(activity,
+                forceUpdate ? "退出应用" : "稍后再说");
+        later.setOnClickListener(new android.view.View.OnClickListener() {
+            @Override public void onClick(android.view.View v) {
+                dlg.dismiss();
+                if (forceUpdate) activity.finishAffinity(); else resetBtn();
+            }
+        });
+        btns.addView(later);
+
+        android.widget.TextView go = com.fntv.app.ui.Ui.primaryButton(activity,
+                isTestInstall ? "测试安装器" : "立即更新", 0);
+        android.widget.LinearLayout.LayoutParams glp = new android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        glp.leftMargin = com.fntv.app.ui.Ui.dp(activity, 12);
+        go.setLayoutParams(glp);
+        go.setOnClickListener(new android.view.View.OnClickListener() {
+            @Override public void onClick(android.view.View v) {
+                dlg.dismiss();
+                downloadAndInstall(apkUrl, remoteVersion, isTestInstall);
+            }
+        });
+        btns.addView(go);
+        body.addView(btns);
+        dlg.setCancelable(!forceUpdate);
+        go.post(new Runnable() {
+            @Override public void run() { go.requestFocus(); }
+        });
     }
 
     // ========== 下载 ==========

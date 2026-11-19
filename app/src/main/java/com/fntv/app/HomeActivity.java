@@ -65,6 +65,12 @@ public class HomeActivity extends AppCompatActivity {
     private boolean selectedLibLive = false;
     private int sortBy = 0; // 0=更新时间(create_time DESC) 1=名称(sort_title ASC)
     private boolean railsRequested = false;
+    private String homeSig = null;   // 首页数据指纹，未变化就不重绘
+    private final java.util.List<String> continueGuids = new java.util.ArrayList<>();
+    private final java.util.List<View> continueViews = new java.util.ArrayList<>();
+    private int savedScrollY = 0;
+    private String savedFocusGuid = null;
+    private boolean userTouched = false;
     private View pendingFocus = null;   // 切排序后把焦点还给点下去的那颗胶囊
 
     private static final int[] MARK_COLORS = {
@@ -79,6 +85,7 @@ public class HomeActivity extends AppCompatActivity {
         Theme.applySaved(this);
         super.onCreate(savedInstanceState);
         Ui.applyScale(this);
+        com.fntv.app.api.FnApiManager.initDiskCache(getApplicationContext());
         setContentView(R.layout.activity_home);
 
         prefs = getSharedPreferences("fntv_prefs", MODE_PRIVATE);
@@ -159,7 +166,78 @@ public class HomeActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         if (currentTab == 0 && !rails.isEmpty()) loadContinue();
+        userTouched = false;
+        restorePosition();
     }
+
+    @Override
+    protected void onSaveInstanceState(android.os.Bundle out) {
+        super.onSaveInstanceState(out);
+        out.putInt("home_scroll_y", savedScrollY);
+        out.putString("home_focus_guid", savedFocusGuid);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (currentTab != 0) return;
+        savedScrollY = scrollHome.getScrollY();
+        savedFocusGuid = focusedCardGuid();
+    }
+
+    private String focusedCardGuid() {
+        View v = getCurrentFocus();
+        while (v != null) {
+            Object tag = v.getTag();
+            if (tag instanceof String && ((String) tag).startsWith("fntv_guid:")) {
+                return ((String) tag).substring(10);
+            }
+            v = (v.getParent() instanceof View) ? (View) v.getParent() : null;
+        }
+        return null;
+    }
+
+    private void restorePosition() {
+        if (currentTab != 0) return;
+        final int y = savedScrollY;
+        final String guid = savedFocusGuid;
+        // 多次兜底：重建/加载完成、焦点重新分配都会把 ScrollView 拉回顶部，
+        // 所以 220/700/1400ms 各纠正一次；用户一按键就停止，避免和用户抢滚动
+        int[] delays = {220, 700, 1400};
+        for (final int delay : delays) {
+            scrollHome.postDelayed(new Runnable() {
+                @Override public void run() {
+                    if (currentTab != 0 || userTouched) return;
+                    if (guid != null) {
+                        View card = findCardByGuid(scrollHome, guid);
+                        if (card != null && !card.hasFocus()) card.requestFocus();
+                    }
+                    scrollHome.scrollTo(0, y);
+                }
+            }, delay);
+        }
+    }
+
+    private View findCardByGuid(View v, String guid) {
+        Object tag = v.getTag();
+        if (tag instanceof String && tag.equals("fntv_guid:" + guid)) return v;
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                View r = findCardByGuid(g.getChildAt(i), guid);
+                if (r != null) return r;
+            }
+        }
+        return null;
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(android.view.KeyEvent e) {
+        if (e.getAction() == android.view.KeyEvent.ACTION_DOWN) userTouched = true;
+        return super.dispatchKeyEvent(e);
+    }
+
+    private long lastBackAt = 0L;
 
     @Override
     public void onBackPressed() {
@@ -167,7 +245,15 @@ public class HomeActivity extends AppCompatActivity {
             switchTab(0);
             return;
         }
-        super.onBackPressed();
+        // 首页再按返回：2 秒内连按两次才退出，防止遥控器误触
+        long now = System.currentTimeMillis();
+        if (now - lastBackAt < 2000) {
+            super.onBackPressed();
+            return;
+        }
+        lastBackAt = now;
+        android.widget.Toast.makeText(this, "再按一次返回键退出",
+                android.widget.Toast.LENGTH_SHORT).show();
     }
 
     // ---------------- 导航 ----------------
@@ -208,6 +294,45 @@ public class HomeActivity extends AppCompatActivity {
         loadLibraries();
     }
 
+    /** 只更新「继续观看」卡片上的剩余时间角标，不重建视图 */
+    /** 只要「这一批剧」没变，就按 guid 匹配原地改角标，顺序变化也不重建 */
+    private boolean updateContinueInPlace(List<PlayListItem> data) {
+        java.util.List<PlayListItem> picked = new java.util.ArrayList<>();
+        int max = Math.min(10, data.size());
+        for (int i = 0; i < max; i++) {
+            if (data.get(i) != null) picked.add(data.get(i));
+        }
+        if (picked.size() != continueViews.size()) return false;
+        java.util.Map<String, View> byGuid = new java.util.HashMap<>();
+        for (int i = 0; i < continueGuids.size() && i < continueViews.size(); i++) {
+            byGuid.put(continueGuids.get(i), continueViews.get(i));
+        }
+        // 集合必须完全一致（忽略顺序）
+        for (PlayListItem it : picked) {
+            if (it.guid == null || !byGuid.containsKey(it.guid)) return false;
+        }
+        for (PlayListItem it : picked) {
+            long remain = it.duration > 0 ? Math.max(0, it.duration - it.ts) : 0;
+            String badge = remain > 0 ? Ui.remainingText(remain) : "未开始";
+            View b = findBadge(byGuid.get(it.guid));
+            if (b instanceof android.widget.TextView) ((android.widget.TextView) b).setText(badge);
+        }
+        continueList = data;
+        return true;
+    }
+
+    private View findBadge(View v) {
+        if ("fntv_badge".equals(v.getTag())) return v;
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                View r = findBadge(g.getChildAt(i));
+                if (r != null) return r;
+            }
+        }
+        return null;
+    }
+
     private void loadContinue() {
         api.getApi().getPlayList().enqueue(new Callback<ApiResponse<List<PlayListItem>>>() {
             @Override
@@ -215,6 +340,22 @@ public class HomeActivity extends AppCompatActivity {
                                    Response<ApiResponse<List<PlayListItem>>> response) {
                 if (response.isSuccessful() && response.body() != null
                         && response.body().code == 0 && response.body().data != null) {
+                    // 内容没变就不重绘首页，避免从播放器返回时整页闪一下
+                    StringBuilder sigB = new StringBuilder();
+                    for (PlayListItem it : response.body().data) {
+                        if (it == null) continue;
+                        sigB.append(it.guid).append(':').append(it.ts).append('|');
+                    }
+                    if (sigB.toString().equals(homeSig) && scrollHome.getChildCount() > 0) {
+                        return;
+                    }
+                    // 走增量 diff：新增插入、消失移除、顺序变化只移动视图，不整页重建
+                    if (continueRowView != null && continueRowView.getChildCount() > 0) {
+                        applyContinueDiff(response.body().data);
+                        homeSig = sigB.toString();
+                        return;
+                    }
+                    homeSig = sigB.toString();
                     continueList = response.body().data;
                     renderHome();
                 }
@@ -323,24 +464,106 @@ public class HomeActivity extends AppCompatActivity {
         }
     }
 
+    private LinearLayout continueRowView;
+
+    private View makeContinueCard(final PlayListItem it) {
+        int pct = it.duration > 0 ? (int) (it.ts * 100 / it.duration) : 0;
+        long remain = it.duration > 0 ? Math.max(0, it.duration - it.ts) : 0;
+        String badge = remain > 0 ? Ui.remainingText(remain) : "未开始";
+        String sub = it.duration > 0 ? Ui.formatDuration(it.duration) : subOf(it);
+        View card = Ui.wideCard(this, it.getDisplayTitle(), sub,
+                Ui.posterUrl(baseUrl, it.poster), badge, pct, 300, 169,
+                new View.OnClickListener() {
+                    @Override public void onClick(View v) { openDetail(it); }
+                });
+        if (it.guid != null) card.setTag("fntv_guid:" + it.guid);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.rightMargin = Ui.dp(this, 14);
+        card.setLayoutParams(lp);
+        return card;
+    }
+
+    /** 方案二：按 guid 做增量 diff —— 新增插入、消失移除、顺序变化只移动，不重建视图 */
+    private void applyContinueDiff(List<PlayListItem> data) {
+        if (continueRowView == null) return;
+        java.util.List<PlayListItem> desired = new java.util.ArrayList<>();
+        int max = Math.min(10, data.size());
+        for (int i = 0; i < max; i++) {
+            if (data.get(i) != null && data.get(i).guid != null) desired.add(data.get(i));
+        }
+        java.util.Map<String, View> existing = new java.util.HashMap<>();
+        for (int i = 0; i < continueRowView.getChildCount(); i++) {
+            View c = continueRowView.getChildAt(i);
+            Object tag = c.getTag();
+            if (tag instanceof String && ((String) tag).startsWith("fntv_guid:")) {
+                existing.put(((String) tag).substring(10), c);
+            }
+        }
+        // 1) 去掉不再需要的
+        java.util.Set<String> want = new java.util.HashSet<>();
+        for (PlayListItem it : desired) want.add(it.guid);
+        for (String g : new java.util.ArrayList<>(existing.keySet())) {
+            if (!want.contains(g)) {
+                continueRowView.removeView(existing.remove(g));
+            }
+        }
+        // 2) 按目标顺序重排 / 补新卡
+        for (int i = 0; i < desired.size(); i++) {
+            PlayListItem it = desired.get(i);
+            View card = existing.get(it.guid);
+            if (card == null) {
+                card = makeContinueCard(it);
+                existing.put(it.guid, card);
+            } else {
+                View b = findBadge(card);
+                long remain = it.duration > 0 ? Math.max(0, it.duration - it.ts) : 0;
+                String badge = remain > 0 ? Ui.remainingText(remain) : "未开始";
+                if (b instanceof android.widget.TextView) ((android.widget.TextView) b).setText(badge);
+            }
+            if (continueRowView.indexOfChild(card) != i) {
+                continueRowView.removeView(card);
+                continueRowView.addView(card, Math.min(i, continueRowView.getChildCount()));
+            }
+        }
+        // 3) 同步缓存
+        continueListsync(desired);
+    }
+
+    private void continueListsync(java.util.List<PlayListItem> desired) {
+        continueViews.clear();
+        continueGuids.clear();
+        for (PlayListItem it : desired) {
+            View card = null;
+            if (continueRowView != null) {
+                for (int i = 0; i < continueRowView.getChildCount(); i++) {
+                    Object tag = continueRowView.getChildAt(i).getTag();
+                    if (tag instanceof String && tag.equals("fntv_guid:" + it.guid)) {
+                        card = continueRowView.getChildAt(i);
+                        break;
+                    }
+                }
+            }
+            if (card != null) {
+                continueViews.add(card);
+                continueGuids.add(it.guid);
+            }
+        }
+    }
+
     private void addContinueRail() {
         homeContainer.addView(Ui.sectionHeader(this, "继续观看", null, null));
         LinearLayout row = Ui.row(this);
+        continueRowView = row;
+        continueViews.clear();
+        continueGuids.clear();
         int max = Math.min(10, continueList.size());
         for (int i = 0; i < max; i++) {
-            final PlayListItem it = continueList.get(i);
+            PlayListItem it = continueList.get(i);
             if (it == null) continue;
-            int pct = it.duration > 0 ? (int) (it.ts * 100 / it.duration) : 0;
-            long remain = it.duration > 0 ? Math.max(0, it.duration - it.ts) : 0;
-            String badge = remain > 0 ? Ui.remainingText(remain) : "未开始";
-            String sub = it.duration > 0 ? Ui.formatDuration(it.duration) : subOf(it);
-            View card = Ui.wideCard(this, it.getDisplayTitle(), sub,
-                    Ui.posterUrl(baseUrl, it.poster), badge, pct, 300, 169,
-                    new View.OnClickListener() {
-                        @Override public void onClick(View v) { openDetail(it); }
-                    });
-            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) card.getLayoutParams();
-            lp.rightMargin = Ui.dp(this, 14);
+            if (it.guid != null) continueGuids.add(it.guid);
+            View card = makeContinueCard(it);
+            continueViews.add(card);
             row.addView(card);
         }
         homeContainer.addView(Ui.rail(this, row));
@@ -724,6 +947,24 @@ public class HomeActivity extends AppCompatActivity {
         } catch (Exception ignored) {}
         about.addView(settingLine("版本", "FN TV v" + version + " · Android 13 已适配", null));
 
+        // 缓存：显示当前占用 + 一键清除
+        final TextView cacheInfo = Ui.text(this, formatCacheSize(cacheTotalSize()), 15,
+                R.color.ui_text2, false);
+        final TextView clearCache = Ui.ghostButton(this, "清除");
+        clearCache.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                clearAllCaches();
+                cacheInfo.setText(formatCacheSize(cacheTotalSize()));
+                android.widget.Toast.makeText(HomeActivity.this, "缓存已清除",
+                        android.widget.Toast.LENGTH_SHORT).show();
+            }
+        });
+        // 缓存大小直接显示在这一行的副标题处
+        View cacheRow = settingLine("缓存", formatCacheSize(cacheTotalSize()), clearCache);
+        about.addView(cacheRow);
+        final TextView cacheInfoRow = findDescText(cacheRow);
+
+
         TextView update = Ui.primaryButton(this, "检查更新", 0);
         updateManager = new UpdateManager(this, update, BuildConfig.VERSION_CODE);
         updateManager.setup();
@@ -784,6 +1025,26 @@ public class HomeActivity extends AppCompatActivity {
         card.addView(Ui.text(this, title, 20, R.color.ui_text, true));
         parent.addView(card);
         return card;
+    }
+
+    /** 取 settingLine 里那个副标题 TextView */
+    private TextView findDescText(View row) {
+        if (!(row instanceof android.view.ViewGroup)) return null;
+        android.view.ViewGroup r = (android.view.ViewGroup) row;
+        if (r.getChildCount() == 0) return null;
+        View col = r.getChildAt(0);
+        if (col instanceof android.view.ViewGroup) {
+            android.view.ViewGroup c = (android.view.ViewGroup) col;
+            for (int i = 0; i < c.getChildCount(); i++) {
+                if (c.getChildAt(i) instanceof TextView) {
+                    TextView tv = (TextView) c.getChildAt(i);
+                    Object tag = tv.getTag();
+                    if ("desc".equals(tag)) return tv;
+                    if (c.getChildCount() > 1 && i == 1) return tv;
+                }
+            }
+        }
+        return null;
     }
 
     private View settingLine(String title, String desc, View control) {
@@ -880,4 +1141,46 @@ public class HomeActivity extends AppCompatActivity {
         if (it.parentGuid != null) intent.putExtra("parent_guid", it.parentGuid);
         startActivity(intent);
     }
+    // ---------- 缓存大小与清理 ----------
+    private long dirSize(java.io.File dir) {
+        if (dir == null || !dir.exists()) return 0;
+        long total = 0;
+        java.io.File[] files = dir.listFiles();
+        if (files == null) return 0;
+        for (java.io.File f : files) {
+            total += f.isDirectory() ? dirSize(f) : f.length();
+        }
+        return total;
+    }
+
+    private long cacheTotalSize() {
+        long total = dirSize(new java.io.File(getCacheDir(), "img"));
+        total += dirSize(new java.io.File(getFilesDir(), "cache/api"));
+        return total;
+    }
+
+    private String formatCacheSize(long bytes) {
+        if (bytes <= 0) return "暂无缓存";
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return String.format("%.0f KB", bytes / 1024f);
+        return String.format("%.1f MB", bytes / 1024f / 1024f);
+    }
+
+    private void clearAllCaches() {
+        com.fntv.app.util.SimpleImageLoader.clearCache();   // 内存图
+        deleteDir(new java.io.File(getCacheDir(), "img"));   // 图片磁盘
+        com.fntv.app.api.FnApiManager.clearApiCache();       // 接口内存
+        deleteDir(new java.io.File(getFilesDir(), "cache/api")); // 接口磁盘
+    }
+
+    private void deleteDir(java.io.File dir) {
+        if (dir == null || !dir.exists()) return;
+        java.io.File[] files = dir.listFiles();
+        if (files != null) {
+            for (java.io.File f : files) {
+                if (f.isDirectory()) deleteDir(f); else f.delete();
+            }
+        }
+    }
+
 }

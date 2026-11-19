@@ -12,6 +12,14 @@
         android:alpha="1.0"
         android:scaleType="centerCrop" />
 
+    <!-- 交叉淡入用的上层：新图先载入这里，淡入完成后再交给下层 -->
+    <ImageView
+        android:id="@+id/backdropNext"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:alpha="0"
+        android:scaleType="centerCrop" />
+
     <View
         android:layout_width="match_parent"
         android:layout_height="match_parent"

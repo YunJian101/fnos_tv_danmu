@@ -39,9 +39,46 @@ public class SimpleImageLoader {
             view.setImageBitmap(cached);
             return;
         }
+        // 磁盘缓存命中：直接读文件解码，省掉一次网络请求
+        Bitmap fromDisk = readDisk(view.getContext(), url);
+        if (fromDisk != null) {
+            cache.put(url, fromDisk);
+            view.setImageBitmap(fromDisk);
+            return;
+        }
 
         // Android 4.4 AsyncTask 默认串行，用线程池实现并行下载
         new ImageLoadTask(view, client).executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, url);
+    }
+
+    /** 带完成回调的加载：背景图用它做双层交叉淡入 */
+    public static void loadWithCallback(String url, final ImageView view, OkHttpClient client,
+                                        final Runnable onDone) {
+        if (url == null || url.isEmpty()) return;
+        Bitmap cached = cache.get(url);
+        if (cached != null) {
+            view.setImageBitmap(cached);
+            if (onDone != null) view.post(onDone);
+            return;
+        }
+        new ImageLoadTask(view, client, false, onDone).executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, url);
+    }
+
+    /** 带淡入的加载：背景大图用这个，避免"啪一下"换图 */
+    public static void loadFade(String url, final ImageView view, OkHttpClient client) {
+        if (url == null || url.isEmpty()) return;
+        Bitmap cached = cache.get(url);
+        if (cached != null) {
+            if (view.getDrawable() == null) {
+                view.setAlpha(0f);
+                view.setImageBitmap(cached);
+                view.animate().alpha(1f).setDuration(240).start();
+            } else {
+                view.setImageBitmap(cached);
+            }
+            return;
+        }
+        new ImageLoadTask(view, client, true).executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, url);
     }
 
     public static void clearCache() {
@@ -52,9 +89,23 @@ public class SimpleImageLoader {
         private final ImageView imageView;
         private final OkHttpClient client;
 
+        private final boolean fade;
+
+        private final Runnable onDone;
+
         ImageLoadTask(ImageView imageView, OkHttpClient client) {
+            this(imageView, client, false, null);
+        }
+
+        ImageLoadTask(ImageView imageView, OkHttpClient client, boolean fade) {
+            this(imageView, client, fade, null);
+        }
+
+        ImageLoadTask(ImageView imageView, OkHttpClient client, boolean fade, Runnable onDone) {
             this.imageView = imageView;
             this.client = client;
+            this.fade = fade;
+            this.onDone = onDone;
         }
 
         @Override
@@ -90,6 +141,8 @@ public class SimpleImageLoader {
                 input.close();
                 byte[] imageData = baos.toByteArray();
 
+                saveDisk(imageView.getContext(), urlStr, imageData);
+
                 // 三重解码尝试
                 Bitmap bitmap = tryDecode(imageData);
 
@@ -109,10 +162,96 @@ public class SimpleImageLoader {
         @Override
         protected void onPostExecute(Bitmap bitmap) {
             if (bitmap != null) {
-                imageView.setImageBitmap(bitmap);
-            } else {
+                if (fade) {
+                    // 背景大图：从透明淡入，避免硬切换造成的"闪一下"
+                    imageView.setAlpha(0f);
+                    imageView.setImageBitmap(bitmap);
+                    imageView.animate().alpha(1f).setDuration(240).start();
+                } else {
+                    imageView.setImageBitmap(bitmap);
+                }
+            } else if (!fade) {
                 imageView.setBackgroundColor(0xFF444444);
             }
+            if (onDone != null) imageView.post(onDone);
+        }
+    }
+
+    // ---------- 图片磁盘缓存（cacheDir/img，LRU 200MB） ----------
+    private static final long DISK_LIMIT = 200L * 1024 * 1024;
+
+    private static java.io.File imgDir(android.content.Context ctx) {
+        java.io.File d = new java.io.File(ctx.getCacheDir(), "img");
+        if (!d.exists()) d.mkdirs();
+        return d;
+    }
+
+    private static String keyOf(String url) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");
+            byte[] dig = md.digest(url.getBytes("UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : dig) sb.append(String.format("%02x", b & 0xff));
+            return sb.toString();
+        } catch (Exception e) {
+            return String.valueOf(url.hashCode());
+        }
+    }
+
+    private static Bitmap readDisk(android.content.Context ctx, String url) {
+        try {
+            java.io.File f = new java.io.File(imgDir(ctx), keyOf(url));
+            if (!f.exists()) return null;
+            byte[] data = readAll(f);
+            if (data == null || data.length == 0) return null;
+            f.setLastModified(System.currentTimeMillis());
+            return BitmapFactory.decodeByteArray(data, 0, data.length);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static void saveDisk(android.content.Context ctx, String url, byte[] data) {
+        try {
+            java.io.File f = new java.io.File(imgDir(ctx), keyOf(url));
+            java.io.FileOutputStream out = new java.io.FileOutputStream(f);
+            out.write(data);
+            out.close();
+            trimDisk(ctx);
+        } catch (Exception ignored) { }
+    }
+
+    private static void trimDisk(android.content.Context ctx) {
+        try {
+            java.io.File[] files = imgDir(ctx).listFiles();
+            if (files == null || files.length < 200) return;
+            long total = 0;
+            for (java.io.File f : files) total += f.length();
+            if (total <= DISK_LIMIT) return;
+            java.util.Arrays.sort(files, new java.util.Comparator<java.io.File>() {
+                @Override public int compare(java.io.File a, java.io.File b) {
+                    return Long.compare(a.lastModified(), b.lastModified());
+                }
+            });
+            for (java.io.File f : files) {
+                if (total <= DISK_LIMIT * 8 / 10) break;
+                total -= f.length();
+                f.delete();
+            }
+        } catch (Exception ignored) { }
+    }
+
+    private static byte[] readAll(java.io.File f) {
+        try {
+            java.io.FileInputStream in = new java.io.FileInputStream(f);
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) != -1) bos.write(buf, 0, n);
+            in.close();
+            return bos.toByteArray();
+        } catch (Exception e) {
+            return null;
         }
     }
 

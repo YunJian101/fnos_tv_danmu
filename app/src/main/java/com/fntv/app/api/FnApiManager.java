@@ -30,6 +30,100 @@ public class FnApiManager {
         RESP_CACHE.clear();
     }
 
+    private static java.io.File apiDir = null;
+
+    /** 由 Activity 启动时调用，给接口磁盘缓存一个目录 */
+    public static void initDiskCache(android.content.Context ctx) {
+        if (ctx == null || apiDir != null) return;
+        apiDir = new java.io.File(ctx.getFilesDir(), "cache/api");
+        if (!apiDir.exists()) apiDir.mkdirs();
+        trimApiDisk();   // 启动时顺手清理过期/超量的接口缓存
+    }
+
+    /** 不同接口的磁盘缓存有效期（秒） */
+    private static long ttlOf(String path) {
+        if (path.contains("/play/list") || path.contains("/play/info")) return 30;
+        if (path.contains("/mediadb/list")) return 3600;
+        if (path.contains("/item/list") || path.contains("/person/list")) return 600;
+        if (path.contains("/stream/list")) return 600;
+        if (path.contains("/item/")) return 3600;
+        return 300;
+    }
+
+    private static String diskKey(String key) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");
+            byte[] dig = md.digest(key.getBytes("UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : dig) sb.append(String.format("%02x", b & 0xff));
+            return sb.toString();
+        } catch (Exception e) {
+            return String.valueOf(key.hashCode());
+        }
+    }
+
+    private static String readDisk(String key, String path) {
+        if (apiDir == null) return null;
+        java.io.File f = new java.io.File(apiDir, diskKey(key) + ".json");
+        if (!f.exists()) return null;
+        if (System.currentTimeMillis() - f.lastModified() > ttlOf(path) * 1000L) return null;
+        try {
+            java.io.FileInputStream in = new java.io.FileInputStream(f);
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) != -1) bos.write(buf, 0, n);
+            in.close();
+            return new String(bos.toByteArray(), "UTF-8");
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static final long API_DISK_LIMIT = 50L * 1024 * 1024;   // 50MB
+    private static final long API_KEEP_MS = 7L * 24 * 3600 * 1000;  // 7 天
+    private static int writeCount = 0;
+
+    /** 定期清理：超过 7 天的文件删除；总量超 50MB 时按最久未访问删到 40MB */
+    private static void trimApiDisk() {
+        if (apiDir == null) return;
+        java.io.File[] files = apiDir.listFiles();
+        if (files == null || files.length == 0) return;
+        long now = System.currentTimeMillis();
+        long total = 0;
+        for (java.io.File f : files) {
+            if (now - f.lastModified() > API_KEEP_MS) {
+                f.delete();
+            } else {
+                total += f.length();
+            }
+        }
+        if (total <= API_DISK_LIMIT) return;
+        java.util.Arrays.sort(files, new java.util.Comparator<java.io.File>() {
+            @Override public int compare(java.io.File a, java.io.File b) {
+                return Long.compare(a.lastModified(), b.lastModified());
+            }
+        });
+        for (java.io.File f : files) {
+            if (total <= API_DISK_LIMIT * 8 / 10) break;
+            if (f.exists()) {
+                total -= f.length();
+                f.delete();
+            }
+        }
+    }
+
+    private static void writeDisk(String key, String text) {
+        if (apiDir == null || text == null) return;
+        try {
+            java.io.File f = new java.io.File(apiDir, diskKey(key) + ".json");
+            java.io.FileOutputStream out = new java.io.FileOutputStream(f);
+            out.write(text.getBytes("UTF-8"));
+            out.close();
+            if (++writeCount % 50 == 0) trimApiDisk();   // 每写 50 次检查一次
+        } catch (Exception ignored) { }
+    }
+
     private static final okhttp3.Interceptor CACHE_INTERCEPTOR = new okhttp3.Interceptor() {
         @Override
         public okhttp3.Response intercept(okhttp3.Interceptor.Chain chain) throws java.io.IOException {
@@ -49,6 +143,10 @@ public class FnApiManager {
             String key = req.method() + " " + req.url().toString() + " " + body;
             if (skipCache) return chain.proceed(req);
             String cached = RESP_CACHE.get(key);
+            String path0 = req.url().encodedPath();
+            if (cached == null) {
+                cached = readDisk(key, path0);   // 进程重启后仍能秒开
+            }
             if (cached != null) {
                 return new okhttp3.Response.Builder()
                         .request(req)
@@ -66,6 +164,7 @@ public class FnApiManager {
             String text = resp.body().string();
             if (text != null && !text.isEmpty() && RESP_CACHE.size() < 400) {
                 RESP_CACHE.put(key, text);
+                writeDisk(key, text);
             }
             return resp.newBuilder()
                     .body(okhttp3.ResponseBody.create(mt, text))

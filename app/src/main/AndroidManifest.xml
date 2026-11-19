@@ -13,6 +13,7 @@
         android:allowBackup="true"
         android:name="androidx.multidex.MultiDexApplication"
         android:icon="@mipmap/ic_launcher"
+        android:banner="@drawable/tv_banner"
         android:roundIcon="@mipmap/ic_launcher"
         android:label="FN TV"
         android:theme="@style/Theme.Fntv"

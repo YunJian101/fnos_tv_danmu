@@ -47,6 +47,8 @@ public class DetailActivity extends AppCompatActivity {
     private String baseUrl;
     private LinearLayout container;
     private ImageView backdrop;
+    private ImageView backdropNext;
+    private String backdropUrl = null;   // 已应用的背景，避免重复加载
 
     private String guid, title, tvTitle, poster, category, overview, vote, type, parentGuid;
     private int episodeNumber, seasonNumber, numberOfSeasons, numberOfEpisodes;
@@ -61,6 +63,7 @@ public class DetailActivity extends AppCompatActivity {
     private boolean isEpisode = false;   // 从「继续观看」进来的是单集
     private String airDate;
     private boolean firstResume = true;
+    private String continueSig = null;   // 继续观看数据指纹，未变化就不重绘
     private String seasonPoster;   // 季封面（/item/{季guid}.posters）
     private String seriesArtwork;  // 剧集大图（/item/{剧集guid}.backdrops 优先）
     private PlayListItem resumeItem;
@@ -81,6 +84,7 @@ public class DetailActivity extends AppCompatActivity {
 
         container = findViewById(R.id.detailContainer);
         backdrop = findViewById(R.id.backdrop);
+        backdropNext = findViewById(R.id.backdropNext);
 
         Intent i = getIntent();
         guid = i.getStringExtra("guid");
@@ -99,8 +103,10 @@ public class DetailActivity extends AppCompatActivity {
         duration = i.getLongExtra("duration", 0);
 
         // 先用列表卡片同一张图填满背景（同一 URL 命中内存缓存），再换成大图
-        String quick = Ui.posterUrl(baseUrl, poster);
-        if (quick != null) Ui.loadImage(backdrop, quick);
+        // 不再先拿竖版封面当背景：那样会闪一下"海报→剧照"。
+        // 卡片里带了 backdrop 就用它，没有就保持纯色底，等 loadArtwork 拿到真正的剧照再淡入。
+        String quick = Ui.posterUrl(baseUrl, getIntent().getStringExtra("backdrop"));
+        if (quick != null) applyBackdrop(quick);
 
         buildShell();
         loadDetail();
@@ -119,9 +125,38 @@ public class DetailActivity extends AppCompatActivity {
         }
         FnApiManager.invalidateApi("/play/list");
         FnApiManager.invalidateApi("/play/info");
+        // 只更新「继续（剩余…）」按钮和续播集，不动下面的卡片列表，避免整块重绘闪烁
         container.postDelayed(new Runnable() {
-            @Override public void run() { loadContinue(); }
-        }, 500);
+            @Override public void run() { refreshPlayState(); }
+        }, 300);
+    }
+
+    /** 局部刷新：只更新续播记录与播放按钮文字，卡片列表保持原样 */
+    private void refreshPlayState() {
+        api.getApi().getPlayList().enqueue(new Callback<ApiResponse<List<PlayListItem>>>() {
+            @Override
+            public void onResponse(Call<ApiResponse<List<PlayListItem>>> call,
+                                   Response<ApiResponse<List<PlayListItem>>> response) {
+                if (!response.isSuccessful() || response.body() == null
+                        || response.body().code != 0 || response.body().data == null) return;
+                String name = displayTitle();
+                for (PlayListItem it : response.body().data) {
+                    if (it == null) continue;
+                    String t = it.tvTitle != null && !it.tvTitle.isEmpty() ? it.tvTitle : it.title;
+                    boolean sameTitle = t != null && t.equals(name);
+                    boolean sameSeason = it.parentGuid != null && seasonGuids.contains(it.parentGuid);
+                    if (sameTitle || sameSeason) {
+                        resumeItem = it;
+                        ts = it.ts;
+                        updatePlayButton();
+                        return;
+                    }
+                }
+            }
+
+            @Override
+            public void onFailure(Call<ApiResponse<List<PlayListItem>>> call, Throwable t) { }
+        });
     }
 
     private String displayTitle() {
@@ -356,7 +391,7 @@ public class DetailActivity extends AppCompatActivity {
                         String bd = info.getBackdropPath();
                         if (bd != null) {
                             String url = Ui.backdropUrl(baseUrl, bd);
-                            if (url != null) Ui.loadImage(backdrop, url);
+                            if (url != null) applyBackdrop(url);
                         }
                     }
                     if (overviewView != null && overview != null) overviewView.setText(overview);
@@ -376,11 +411,22 @@ public class DetailActivity extends AppCompatActivity {
             @Override
             public void onResponse(Call<ApiResponse<List<PlayListItem>>> call,
                                    Response<ApiResponse<List<PlayListItem>>> response) {
-                continueRow.removeAllViews();
                 if (!response.isSuccessful() || response.body() == null
                         || response.body().code != 0 || response.body().data == null) {
                     return;
                 }
+                // 数据没变就不重建视图，避免每次从播放器返回都"闪一下"
+                StringBuilder sigB = new StringBuilder();
+                for (PlayListItem it : response.body().data) {
+                    if (it == null) continue;
+                    sigB.append(it.guid).append(':').append(it.ts).append('|');
+                }
+                String sig = sigB.toString();
+                if (sig.equals(continueSig) && continueRow.getChildCount() > 0) {
+                    return;
+                }
+                continueSig = sig;
+                continueRow.removeAllViews();
                 String name = displayTitle();
                 List<PlayListItem> picked = new ArrayList<>();
                 for (PlayListItem it : response.body().data) {
@@ -450,7 +496,7 @@ public class DetailActivity extends AppCompatActivity {
                             if (art != null && !art.isEmpty()) {
                                 seriesArtwork = art;
                                 String url = Ui.backdropUrl(baseUrl, art);
-                                if (url != null) Ui.loadImage(backdrop, url);
+                                if (url != null) applyBackdrop(url);
                             }
                         }
 
@@ -459,7 +505,7 @@ public class DetailActivity extends AppCompatActivity {
                     });
                 } else if (seasonPoster != null) {
                     String url = Ui.backdropUrl(baseUrl, seasonPoster);
-                    if (url != null) Ui.loadImage(backdrop, url);
+                    if (url != null) applyBackdrop(url);
                 }
             }
 
@@ -469,6 +515,27 @@ public class DetailActivity extends AppCompatActivity {
     }
 
     /** 继续观看：以正在看的那一集为起点，列出整季所有集，焦点落在该集上 */
+    /** 背景统一入口：单数据源 + 双层交叉淡入，旧图始终可见直到新图淡入完成 */
+    private void applyBackdrop(String url) {
+        if (url == null || url.isEmpty() || backdropNext == null) return;
+        if (url.equals(backdropUrl)) return;
+        backdropUrl = url;
+        com.fntv.app.util.SimpleImageLoader.loadWithCallback(url, backdropNext,
+                FnApiManager.getInstance().getClient(), new Runnable() {
+                    @Override public void run() {
+                        backdropNext.setAlpha(0f);
+                        backdropNext.animate().alpha(1f).setDuration(260).withEndAction(new Runnable() {
+                            @Override public void run() {
+                                if (backdropNext.getDrawable() != null) {
+                                    backdrop.setImageDrawable(backdropNext.getDrawable());
+                                }
+                                backdropNext.setAlpha(0f);
+                            }
+                        }).start();
+                    }
+                });
+    }
+
     private void loadEpisodeRail(final PlayListItem resume) {
         String seasonGuid = resume.parentGuid;
         if (seasonGuid == null && !seasons.isEmpty()) seasonGuid = seasons.get(0).guid;
@@ -519,11 +586,8 @@ public class DetailActivity extends AppCompatActivity {
                 final View f = focusTarget;
                 f.post(new Runnable() {
                     @Override public void run() {
-                        if (playBtn != null && playBtn.isShown() && playBtn.isFocusable()) {
-                            playBtn.requestFocus();
-                        } else if (f != null) {
-                            f.requestFocus();
-                        }
+                        // 焦点统一由 focusMainButton() 负责，这里不再抢
+                        focusMainButton();
                     }
                 });
             }
@@ -574,8 +638,23 @@ public class DetailActivity extends AppCompatActivity {
             }
         });
     }
+    private boolean focusGiven = false;
+
+    /** 页面首屏完成后统一把焦点交给主按钮（播放/继续），与有没有播放记录无关 */
+    private void focusMainButton() {
+        if (focusGiven || playBtn == null) return;
+        playBtn.postDelayed(new Runnable() {
+            @Override public void run() {
+                if (focusGiven || playBtn == null || !playBtn.isShown()) return;
+                focusGiven = true;
+                playBtn.requestFocus();
+            }
+        }, 120);
+    }
+
     private void updatePlayButton() {
         if (playBtn == null) return;
+        focusMainButton();
         if (isEpisode) {
             if (ts > 0 && duration > ts) {
                 playBtn.setText("继续（剩余 " + cnDuration(duration - ts) + "）");

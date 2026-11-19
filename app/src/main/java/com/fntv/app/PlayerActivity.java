@@ -1451,15 +1451,9 @@ public class PlayerActivity extends AppCompatActivity {
         handler.postDelayed(hideC, 5000);
     }
     private final Runnable hideC = () -> {
-        // 焦点在控制器按钮上时推迟隐藏，infoPanel/顶栏/无焦点时正常隐藏
-        if (controller.hasFocus() || btnDanmu.hasFocus() || btnLock.hasFocus()
-                || btnCloudMode.hasFocus() || btnBrightness.hasFocus() || btnSkip.hasFocus()
-                || btnInfo.hasFocus() || btnBack.hasFocus()
-                || (btnHdrToggle != null && btnHdrToggle.hasFocus())
-                || (btnQuality != null && btnQuality.hasFocus())) {
-            resetHideTimer();
-            return;
-        }
+        // 只要没在弹窗/信息面板/锁屏状态，控制栏就必须按时收起；
+        // 之前是"焦点在按钮上就不隐藏"，结果遥控器一直有焦点 → 永远不自动隐藏
+        if (infoVis || isLocked) { resetHideTimer(); return; }
         showCtrl(false);
     };
 
@@ -1787,17 +1781,9 @@ public class PlayerActivity extends AppCompatActivity {
         if (ctrlVis) {
             switch (k) {
                 case KeyEvent.KEYCODE_BACK:
+                    // 信息面板打开时，先关面板；其余情况一次返回直接退出播放页
                     if (infoVis) { toggleInfo(); return true; }
-                    // 有控件焦点 → 清掉，自动回退到 playerView
-                    if (controller.hasFocus() || btnDanmu.hasFocus() || btnLock.hasFocus() || btnCloudMode.hasFocus() || btnBrightness.hasFocus() || btnSkip.hasFocus() || topBar.hasFocus() || btnBack.hasFocus()) {
-                        topBar.clearFocus();
-                        controller.clearFocus();
-                        btnDanmu.clearFocus();
-                        btnLock.clearFocus();
-                        return true;
-                    }
-                    // 无按钮焦点（playerView 或其它）→ 收起控制栏
-                    showCtrl(false);
+                    finish();
                     return true;
 
                 case KeyEvent.KEYCODE_DPAD_CENTER: case KeyEvent.KEYCODE_ENTER:
@@ -1821,13 +1807,9 @@ public class PlayerActivity extends AppCompatActivity {
         } else {
             switch (k) {
                 case KeyEvent.KEYCODE_BACK:
-                    if (backPressedTime + 2000 > System.currentTimeMillis()) {
-                        restoreOrientation();
-                        finish();
-                    } else {
-                        backPressedTime = System.currentTimeMillis();
-                        Toast.makeText(this, "再按一次退出播放", Toast.LENGTH_SHORT).show();
-                    }
+                    // 控制栏隐藏时也是一次返回就退出，不再要求"再按一次"
+                    restoreOrientation();
+                    finish();
                     return true;
                 case KeyEvent.KEYCODE_DPAD_CENTER: case KeyEvent.KEYCODE_ENTER:
                 case KeyEvent.KEYCODE_DPAD_UP:

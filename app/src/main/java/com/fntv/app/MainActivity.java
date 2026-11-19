@@ -47,6 +47,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         Theme.applySaved(this);
         super.onCreate(savedInstanceState);
+        com.fntv.app.api.FnApiManager.initDiskCache(getApplicationContext());
         setContentView(R.layout.activity_main);
 
         prefs = getSharedPreferences("fntv_prefs", MODE_PRIVATE);

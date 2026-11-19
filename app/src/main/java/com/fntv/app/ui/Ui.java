@@ -88,6 +88,11 @@ public final class Ui {
         });
     }
 
+    public static void loadImageFade(ImageView iv, String url) {
+        if (url == null || url.isEmpty()) return;
+        SimpleImageLoader.loadFade(url, iv, FnApiManager.getInstance().getClient());
+    }
+
     public static void loadImage(ImageView iv, String url) {
         SimpleImageLoader.load(url, iv, FnApiManager.getInstance().getClient());
     }
@@ -535,6 +540,7 @@ public final class Ui {
 
         if (badgeText != null && !badgeText.isEmpty()) {
             TextView b = text(c, badgeText, 11, R.color.ui_badge_text, false);
+            b.setTag("fntv_badge");   // 供局部更新时定位角标文字
             b.setBackgroundResource(R.drawable.ui_badge_time);
             b.setPadding(dp(c, 10), dp(c, 5), dp(c, 10), dp(c, 5));
             FrameLayout.LayoutParams blp = new FrameLayout.LayoutParams(
