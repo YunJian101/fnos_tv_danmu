@@ -230,6 +230,21 @@
                 android:orientation="horizontal">
 
                 <Button
+                    android:id="@+id/btnDecode"
+                    android:layout_width="wrap_content"
+                    android:layout_height="38dp"
+                    android:layout_marginEnd="10dp"
+                    android:background="@drawable/ui_btn_player"
+                    android:focusable="true"
+                    android:minWidth="0dp"
+                    android:paddingLeft="16dp"
+                    android:paddingRight="16dp"
+                    android:text="硬解"
+                    android:textAllCaps="false"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="13sp" />
+
+                <Button
                     android:id="@+id/btnSpeed"
                     android:layout_width="wrap_content"
                     android:layout_height="38dp"

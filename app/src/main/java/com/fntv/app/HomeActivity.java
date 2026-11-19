@@ -219,6 +219,30 @@ public class HomeActivity extends AppCompatActivity {
 
     // ---------------- 导航 ----------------
 
+    /** 首页默认焦点：第一张卡片（媒体库/继续观看），没有内容才退回设置图标 */
+    private void focusHomeFirst() {
+        homeContainer.postDelayed(new Runnable() {
+            @Override public void run() {
+                View target = findFirstFocusable(homeContainer);
+                if (target != null) target.requestFocus();
+                else btnGear.requestFocus();
+            }
+        }, 260);
+    }
+
+    private View findFirstFocusable(android.view.ViewGroup parent) {
+        for (int i = 0; i < parent.getChildCount(); i++) {
+            View c = parent.getChildAt(i);
+            if (c.getVisibility() != View.VISIBLE) continue;
+            if (c.isFocusable()) return c;
+            if (c instanceof android.view.ViewGroup) {
+                View inner = findFirstFocusable((android.view.ViewGroup) c);
+                if (inner != null) return inner;
+            }
+        }
+        return null;
+    }
+
     private void switchTab(int index) {
         currentTab = index;
         // 首页内容必须一起隐藏，否则它上面的卡片仍然可聚焦，
@@ -231,7 +255,7 @@ public class HomeActivity extends AppCompatActivity {
         if (index == 2) {
             btnSetBack.requestFocus();
         } else {
-            btnGear.requestFocus();
+            focusHomeFirst();   // 回到首页优先聚焦内容，而不是右上角设置
         }
         // 面板切换后焦点有可能被清空，延迟兜底一次
         final View fallback = index == 2 ? btnSetBack : btnGear;
@@ -721,6 +745,10 @@ public class HomeActivity extends AppCompatActivity {
                     }
                 })));
 
+        // ---------- 硬件解码器清单（方便排查/截图） ----------
+        LinearLayout decCard = settingsCard(left, "硬件解码器");
+        decCard.addView(Ui.text(this, decoderReport(), 13, R.color.ui_text2, false));
+
         int buffer = prefs.getInt("buffer_time", 30);
         int bufIdx = buffer == 15 ? 1 : (buffer == 60 ? 2 : 0);
         play.addView(settingLine("缓冲时间", "开始播放前预加载的秒数",
@@ -884,6 +912,45 @@ public class HomeActivity extends AppCompatActivity {
             }
         }
         return null;
+    }
+
+    /** 列出设备上所有视频解码器（含厂商硬解/系统软解），方便排查 */
+    private String decoderReport() {
+        StringBuilder sb = new StringBuilder();
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 21) {
+                android.media.MediaCodecList list =
+                        new android.media.MediaCodecList(android.media.MediaCodecList.ALL_CODECS);
+                int hw = 0, sw = 0;
+                for (android.media.MediaCodecInfo ci : list.getCodecInfos()) {
+                    if (ci == null || ci.isEncoder()) continue;
+                    StringBuilder types = new StringBuilder();
+                    boolean video = false;
+                    for (String t : ci.getSupportedTypes()) {
+                        if (t == null) continue;
+                        String m = t.toLowerCase();
+                        if (m.startsWith("video/")) {
+                            video = true;
+                            if (types.length() > 0) types.append("/");
+                            types.append(m.replace("video/", "").toUpperCase());
+                        }
+                    }
+                    if (!video) continue;
+                    String name = ci.getName();
+                    boolean isSoft = name == null || name.startsWith("omx.google.")
+                            || name.startsWith("c2.android.") || name.contains("software");
+                    if (isSoft) sw++; else hw++;
+                    sb.append(isSoft ? "软 " : "硬 ").append(name)
+                      .append("  [").append(types).append("]\n");
+                }
+                sb.insert(0, "硬解 " + hw + " 个 · 软解 " + sw + " 个\n\n");
+            } else {
+                sb.append("系统版本过低，无法枚举");
+            }
+        } catch (Exception e) {
+            sb.append("枚举失败: ").append(e.getMessage());
+        }
+        return sb.toString().trim();
     }
 
     private View settingLine(String title, String desc, View control) {

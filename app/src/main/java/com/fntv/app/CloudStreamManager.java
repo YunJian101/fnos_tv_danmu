@@ -315,6 +315,19 @@ public class CloudStreamManager {
     // ========== 画质菜单 ==========
 
     /** 显示画质/模式切换菜单 */
+    /** 硬解失败时自动切到最高码率的转码档（服务端解码），成功返回 true */
+    public boolean autoPickLowestPreset() {
+        if (qualityCount <= 1 || qualityLabels == null) return false;
+        int target = qualityIndex == 0 ? 1 : 0;   // 0 通常是原画，1 是最高档转码
+        if (target >= qualityCount) target = qualityCount - 1;
+        if (target == qualityIndex) return false;
+        qualityIndex = target;
+        cb.getPrefs().edit().putInt("cloud_quality_index", qualityIndex).apply();
+        updateCloudBtnText();
+        cb.runOnUiThread(() -> reloadPlayback());
+        return true;
+    }
+
     public void showQualityMenu() {
         final SharedPreferences sp = cb.getPrefs();
         if (isStrmFile && qualityCount > 0 && qualityLabels != null) {

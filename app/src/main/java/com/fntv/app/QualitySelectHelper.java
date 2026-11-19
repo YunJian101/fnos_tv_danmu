@@ -173,6 +173,12 @@ public class QualitySelectHelper {
 
     private boolean autoTranscodeTried = false;
 
+    /** 转码流中断后重连：重新请求一条新链接（带当前播放位置） */
+    public void retryTranscodeLink() {
+        autoTranscodeTried = false;
+        transcodeFallback();
+    }
+
     /** 设备解码不了原片时，自动请求 1080P H.264 转码流 */
     public void transcodeFallback() {
         if (autoTranscodeTried) return;
@@ -222,14 +228,23 @@ public class QualitySelectHelper {
             body.put("video_guid", streamData.videoStream.guid != null ? streamData.videoStream.guid : "");
         }
         body.put("video_encoder", "h264");
-        body.put("resolution", "1080p");
-        body.put("bitrate", 4000000);
+        // 按源分辨率/源码率转码：不降分辨率、不降码率
+        if (streamData.videoStream != null && streamData.videoStream.height > 0) {
+            int h = streamData.videoStream.height;
+            String label = h >= 2000 ? "2160p" : h >= 1400 ? "1440p"
+                    : h >= 1000 ? "1080p" : h >= 700 ? "720p" : "480p";
+            body.put("resolution", label);
+        }
+        if (streamData.videoStream != null && streamData.videoStream.bps > 0) {
+            body.put("bitrate", streamData.videoStream.bps);   // 源码率
+        }
         body.put("startTimestamp", qCallback.getPlaybackPosition());
         if (streamData.audioStreams != null && !streamData.audioStreams.isEmpty()) {
             StreamResponse.AudioStreamInfo a = streamData.audioStreams.get(0);
-            body.put("audio_encoder", a.codecName != null ? a.codecName : "");
+            // 输出编码固定 aac：服务端不接受 dts/truehd 这类作为转码输出，会直接拒绝
+            body.put("audio_encoder", "aac");
             body.put("audio_guid", a.guid != null ? a.guid : "");
-            body.put("channels", a.channels);
+            body.put("channels", a.channels > 2 ? 2 : a.channels);
         }
         Log.d(TAG, "转码兜底 play/play: " + new com.google.gson.Gson().toJson(body));
         apiManager.getApi().getPlayLink(body).enqueue(new retrofit2.Callback<ApiResponse<PlayLinkResponse>>() {

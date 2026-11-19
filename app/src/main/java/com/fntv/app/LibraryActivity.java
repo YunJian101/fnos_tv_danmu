@@ -304,37 +304,43 @@ public class LibraryActivity extends AppCompatActivity {
         });
     }
 
+    private List<PlayListItem> items = new ArrayList<>();
+
+    /** 只记录数据，真正创建卡片交给分批渲染，避免一次性造上百个视图 */
     private void buildCards(List<PlayListItem> list) {
-        for (final PlayListItem it : list) {
-            if (it == null) continue;
-            View card;
-            if (isLive) {
-                card = Ui.wideCard(this, it.title == null ? it.getDisplayTitle() : it.title,
-                        subOf(it), Ui.posterUrl(baseUrl, it.poster), null, 0, 260, 146,
-                        new View.OnClickListener() {
-                            @Override public void onClick(View v) { play(it); }
-                        });
-            } else {
-                card = Ui.posterCard(this, it.getDisplayTitle(), subOf(it),
-                        Ui.posterUrl(baseUrl, it.poster), null, null, 150, 214,
-                        new View.OnClickListener() {
-                            @Override public void onClick(View v) { openDetail(it); }
-                        });
-            }
-            cards.add(card);
+        items = list == null ? new ArrayList<>() : list;
+        cards.clear();
+        for (int i = 0; i < items.size(); i++) {
+            if (items.get(i) == null) continue;
+            cards.add(null);   // 占位，渲染到那一屏时再创建
         }
         gridChunked(0, 2);
+    }
+
+    private View makeCard(final PlayListItem it) {
+        if (isLive) {
+            return Ui.wideCard(this, it.title == null ? it.getDisplayTitle() : it.title,
+                    subOf(it), Ui.posterUrl(baseUrl, it.poster), null, 0, 260, 146,
+                    new View.OnClickListener() {
+                        @Override public void onClick(View v) { play(it); }
+                    });
+        }
+        return Ui.posterCard(this, it.getDisplayTitle(), subOf(it),
+                Ui.posterUrl(baseUrl, it.poster), null, null, 150, 214,
+                new View.OnClickListener() {
+                    @Override public void onClick(View v) { openDetail(it); }
+                });
     }
 
     private void gridChunked(int startRow, int rowsPerChunk) {
         int widthDp = getResources().getConfiguration().screenWidthDp;
         int cols = Math.max(3, widthDp / 170);
         int start = startRow * cols;
-        if (start >= cards.size()) {
+        if (start >= items.size()) {
             if (start == 0) countView.setText("这个媒体库是空的");
             return;
         }
-        int end = Math.min(start + cols * rowsPerChunk, cards.size());
+        int end = Math.min(start + cols * rowsPerChunk, items.size());
         for (int i = start; i < end; i += cols) {
             LinearLayout line = new LinearLayout(this);
             line.setOrientation(LinearLayout.HORIZONTAL);
@@ -345,12 +351,18 @@ public class LibraryActivity extends AppCompatActivity {
             line.setLayoutParams(lp);
             for (int j = 0; j < cols; j++) {
                 int idx = i + j;
-                if (idx >= cards.size()) break;
-                View card = cards.get(idx);
+                if (idx >= items.size()) break;
+                PlayListItem it = items.get(idx);
+                if (it == null) continue;
+                View card = cards.size() > idx ? cards.get(idx) : null;
+                if (card == null) {
+                    card = makeCard(it);           // 只在这一刻创建这一批
+                    while (cards.size() <= idx) cards.add(null);
+                    cards.set(idx, card);
+                }
                 if (card.getParent() instanceof ViewGroup) {
                     ((ViewGroup) card.getParent()).removeView(card);
                 }
-                // 卡宽必须写死，否则海报被拉伸成方形
                 LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
                         Ui.dp(this, 150), ViewGroup.LayoutParams.WRAP_CONTENT);
                 clp.rightMargin = Ui.dp(this, 18);
@@ -359,17 +371,19 @@ public class LibraryActivity extends AppCompatActivity {
             }
             listContainer.addView(line);
         }
-        if (end < cards.size()) {
+        if (end < items.size()) {
             final int next = startRow + rowsPerChunk;
             listContainer.postDelayed(new Runnable() {
                 @Override public void run() {
                     if (!isFinishing()) gridChunked(next, rowsPerChunk);
                 }
             }, 16);
-        } else if (start == 0 && !cards.isEmpty()) {
+        } else if (start == 0 && !cards.isEmpty() && cards.get(0) != null) {
             cards.get(0).postDelayed(new Runnable() {
                 @Override public void run() {
-                    if (!isFinishing() && !cards.isEmpty()) cards.get(0).requestFocus();
+                    if (!isFinishing() && !cards.isEmpty() && cards.get(0) != null) {
+                        cards.get(0).requestFocus();
+                    }
                 }
             }, 120);
         }

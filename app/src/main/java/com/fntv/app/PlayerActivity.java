@@ -38,7 +38,13 @@ public class PlayerActivity extends AppCompatActivity {
     private SimpleExoPlayer player;
     private TextView tvBuffering, tvTime, infoText;
     private SeekBar seekBar;
-    private Button btnPlayPause, btnRewind, btnForward, btnSpeed, btnRatio, btnInfo, btnEpisodeList, btnNextEp, btnBack, btnDanmu, btnHdrToggle, btnQuality;
+    private boolean forceSoftwareDirect = false;   // 用户手动选了软解：走原画软解，不自动转码
+    private String originalPlaybackUrl = null;   // 原始直连地址（没走转码时的那条）
+    /** 本次播放的软解偏好：只在内存里，退出播放器即失效 */
+    private static boolean SESSION_SOFT = false;
+    private static long SESSION_RESUME_MS = 0L;
+    private boolean sessionSoftDecode = SESSION_SOFT;   // 本次播放是否强制软解（只影响当前视频）
+    private Button btnDecode, btnPlayPause, btnRewind, btnForward, btnSpeed, btnRatio, btnInfo, btnEpisodeList, btnNextEp, btnBack, btnDanmu, btnHdrToggle, btnQuality;
     private View btnCloseInfo;
     private ImageView btnLock;
     private TextView tvTitle, tvDanmuStatus, tvDanmuMatch, tvSpeedHint, infoTextAudio, infoTextExtra;
@@ -84,6 +90,9 @@ public class PlayerActivity extends AppCompatActivity {
     private int streamBitrate = 0; // bps 来自 stream API
     private Runnable seekCommitR;
     private long pendingSeekMs = -1;
+    private boolean reconnectTried = false;   // 源中断是否已尝试重连
+    private boolean autoTranscoded = false;   // 是否已因硬解失败自动切到转码
+    private boolean fallbackToSoftware = false;   // 本次播放临时降级为软解
     private String savedPlaybackUrl = null; // 当前播放地址（用于硬解失败后切软解重试）
     private String customQualityRes = "";   // 非原画时的分辨率
     private int customQualityBitrate = 0;   // 非原画时的码率
@@ -275,6 +284,17 @@ public class PlayerActivity extends AppCompatActivity {
         btnForward.setOnClickListener(v -> seekRel(seekFwd));
         btnRewind.setContentDescription("-" + (seekBack / 1000) + "秒");
         btnForward.setContentDescription("+" + (seekFwd / 1000) + "秒");
+        btnDecode = findViewById(R.id.btnDecode);
+        btnDecode.setText(sessionSoftDecode ? "软解" : "硬解");
+        btnDecode.setOnClickListener(v -> {
+            sessionSoftDecode = !sessionSoftDecode;
+            SESSION_SOFT = sessionSoftDecode;
+            SESSION_RESUME_MS = player != null ? player.getCurrentPosition() : 0;
+            btnDecode.setText(sessionSoftDecode ? "软解" : "硬解");
+            showOsdHint(sessionSoftDecode ? "正在以软解重新加载…" : "正在以硬解重新加载…");
+            recreate();   // 整个页面按新解码方式重建，和"设置里改完再进"完全一致
+        });
+
         btnSpeed.setOnClickListener(v -> cycleSpeed());
         btnRatio.setOnClickListener(v -> cycleRatio());
         btnInfo.setOnClickListener(v -> toggleInfo());
@@ -299,7 +319,11 @@ public class PlayerActivity extends AppCompatActivity {
                         String fullUrl = baseUrl + playLink;
                         Log.d(TAG, "画质切换新链接: " + fullUrl + " res=" + res + " bitrate=" + bps + " seek=" + seekPosMs);
                         if (player != null) {
+                            if (!fullUrl.contains("/preset.m3u8") && originalPlaybackUrl == null) {
+                                originalPlaybackUrl = fullUrl;
+                            }
                             savedPlaybackUrl = fullUrl;
+        if (!fullUrl.contains("/preset.m3u8")) originalPlaybackUrl = fullUrl;
                             useHls = fullUrl.contains(".m3u8");
                             com.google.android.exoplayer2.upstream.DataSource.Factory f = () -> new OkHttpExoDataSource(apiManager.getStreamClient());
                             if (useHls) {
@@ -648,7 +672,7 @@ public class PlayerActivity extends AppCompatActivity {
             }
         }
         DefaultRenderersFactory rf = new DefaultRenderersFactory(this);
-        if ("software".equals(getSharedPreferences("fntv_prefs", MODE_PRIVATE).getString("decoder_mode", "hardware"))) {
+        if (SESSION_SOFT || "software".equals(getSharedPreferences("fntv_prefs", MODE_PRIVATE).getString("decoder_mode", "hardware"))) {
             rf.setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER);
         } else {
             rf.setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON);
@@ -745,13 +769,41 @@ public class PlayerActivity extends AppCompatActivity {
                 }
                 Log.e(TAG, sb2.toString());
                 // 视频/音频解码器崩溃 → 自动切软解重试
+                // 网络/源中断（转码流还没产出、缓冲区耗尽）：重连一次转码流
+                Throwable cause = e.getCause();
+                boolean networkIssue = cause instanceof java.io.IOException
+                        || (e.getMessage() != null && (e.getMessage().contains("Source error")
+                        || e.getMessage().contains("Unable to connect")
+                        || e.getMessage().contains("Read timed out")));
+                if (networkIssue && !reconnectTried) {
+                    reconnectTried = true;
+                    Log.d(TAG, "播放源中断，重连转码流");
+                    handler.post(() -> showOsdHint("片源中断，正在重连…"));
+                    if (qualityHelper != null) {
+                        handler.postDelayed(() -> qualityHelper.retryTranscodeLink(), 1200);
+                        return;
+                    }
+                }
+
+                // 视频解码失败：绝不自动改软解，只提示用户手动处理
+                if (e.getMessage() != null && e.getMessage().contains("MediaCodecVideoRenderer")) {
+                    Log.d(TAG, "视频硬解失败，尝试切服务端转码");
+                    if (!autoTranscoded && cloudStreamManager != null
+                            && cloudStreamManager.autoPickLowestPreset()) {
+                        autoTranscoded = true;
+                        handler.post(() -> showOsdHint("这台设备硬解不了原画，已自动切换服务端解码"));
+                        return;
+                    }
+                    handler.post(() -> showOsdHint("这台设备硬解不了这个片源（4K/HDR/10bit），"
+                            + "请在画质里选择较低清晰度"));
+                    return;
+                }
+                // 音频解码失败才允许本次播放临时切软解（DTS 之类没有硬解器）
                 if (!swDecoderTried && e.getMessage() != null
-                        && (e.getMessage().contains("MediaCodecVideoRenderer")
-                            || e.getMessage().contains("MediaCodecAudioRenderer"))) {
+                        && e.getMessage().contains("MediaCodecAudioRenderer")) {
                     swDecoderTried = true;
-                    Log.d(TAG, "硬解失败，切换到软解重试");
-                    getSharedPreferences("fntv_prefs", MODE_PRIVATE)
-                            .edit().putString("decoder_mode", "software").apply();
+                    Log.d(TAG, "音频硬解失败，本次播放临时切软解重试（不改用户设置）");
+                    fallbackToSoftware = true;
                     isHwDecode = false;
                     handler.post(() -> recreatePlayerWithSwDecoder());
                     return;
@@ -866,6 +918,92 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     /** 开始播放（加载到 ExoPlayer） */
+    private long lastLinkRefreshAt = 0L;
+
+    /** 转码流是"按需生成"的：缓冲见底前主动续接一条新链接，避免服务端停转后断流 */
+    private void startBufferWatch() {
+        handler.postDelayed(new Runnable() {
+            @Override public void run() {
+                try {
+                    if (isFinishing() || player == null) return;
+                    if (autoTranscoded && player.isPlaying()) {
+                        long cur = player.getCurrentPosition();
+                        long buf = player.getBufferedPosition();
+                        long dur = player.getDuration();
+                        boolean nearEnd = dur > 0 && cur > dur - 5000;
+                        long since = System.currentTimeMillis() - lastLinkRefreshAt;
+                        if (!nearEnd && buf - cur < 2000 && since > 60000) {
+                            lastLinkRefreshAt = System.currentTimeMillis();
+                            Log.d(TAG, "缓冲剩余 " + (buf - cur) + "ms，主动续接转码流");
+                            showOsdHint("正在续接转码流…");
+                            if (qualityHelper != null) qualityHelper.retryTranscodeLink();
+                        }
+                    }
+                } catch (Exception ignored) { }
+                handler.postDelayed(this, 5000);
+            }
+        }, 6000);
+    }
+
+    /** 首帧超时（4 秒没画面）→ 自动切服务端解码，避免"有声音黑屏"卡在那里 */
+    private void scheduleFirstFrameCheck() {
+        final long startAt = System.currentTimeMillis();
+        handler.postDelayed(new Runnable() {
+            @Override public void run() {
+                if (isFinishing() || player == null) return;
+                boolean hasVideo = player.getVideoFormat() != null;
+                long rendered = player.getCurrentPosition() > 0 ? 1 : 0;   // 有播放进度即视为能出帧
+                boolean noFrame = !hasVideo;
+                Log.d(TAG, "首帧检查: hasVideo=" + hasVideo + " waited="
+                        + (System.currentTimeMillis() - startAt));
+                if (noFrame && !autoTranscoded && !forceSoftwareDirect) {
+                    autoTranscoded = true;
+                    showOsdHint("检测到没有画面，正在请求服务端转码…");
+                    if (qualityHelper != null) {
+                        // 走 /play/play 请求服务端转码（h264 / 1080p），和画质菜单里的转码同一条路
+                        qualityHelper.transcodeFallback();
+                    } else {
+                        showOsdHint("这个片源解不出画面，请在画质里选择较低清晰度");
+                    }
+                }
+            }
+        }, 4000);
+    }
+
+    /** 起播前判断：这台设备能不能硬解这个片源；不能就直接请求服务端转码 */
+    private boolean needsServerTranscode() {
+        try {
+            String codec = streamVCodec == null ? "" : streamVCodec.toLowerCase();
+            String mime = null;
+            if (codec.contains("hevc") || codec.startsWith("hvc") || codec.contains("h.265")) {
+                mime = "video/hevc";
+            } else if (codec.contains("avc") || codec.contains("h.264") || codec.startsWith("avc")) {
+                mime = "video/avc";
+            }
+            if (mime == null) return false;
+            if (android.os.Build.VERSION.SDK_INT < 21) return false;
+
+            com.google.android.exoplayer2.Format fmt = new com.google.android.exoplayer2.Format.Builder()
+                    .setSampleMimeType(mime)
+                    .setCodecs(streamVProfile != null && !streamVProfile.isEmpty() ? streamVProfile : null)
+                    .setWidth(streamVWidth)
+                    .setHeight(streamVHeight)
+                    .build();
+
+            com.google.android.exoplayer2.mediacodec.MediaCodecInfo info =
+                    com.google.android.exoplayer2.mediacodec.MediaCodecUtil.getDecoderInfo(mime, false, false);
+            if (info != null && info.isFormatSupported(fmt)) {
+                Log.d(TAG, "预检: 硬解可用 " + info.name);
+                return false;
+            }
+            Log.d(TAG, "预检: 硬解不支持该规格，转服务端转码");
+            return true;
+        } catch (Exception e) {
+            Log.d(TAG, "预检异常: " + e.getMessage());
+            return false;
+        }
+    }
+
     private void startPlayback() {
         if (mediaGuid == null) return;
         OkHttpExoDataSource.resetLoadedBytes();
@@ -881,7 +1019,22 @@ public class PlayerActivity extends AppCompatActivity {
             player.setMediaSource(new com.google.android.exoplayer2.source.ProgressiveMediaSource.Factory(f, new DefaultExtractorsFactory()).createMediaSource(MediaItem.fromUri(cfg.url)));
             Log.d(TAG, "播放器: 渐进式");
         }
+        // 规格超出设备硬解能力 → 直接让服务端转码，别先软解卡一段
+        if (!autoTranscoded && !forceSoftwareDirect && needsServerTranscode() && qualityHelper != null) {
+            autoTranscoded = true;
+            showOsdHint("这个片源超出设备硬解能力，正在请求服务端转码…");
+            qualityHelper.transcodeFallback();
+            return;
+        }
+
         player.prepare(); player.setPlayWhenReady(true);
+        scheduleFirstFrameCheck();
+        if (SESSION_RESUME_MS > 0) {
+            final long resume = SESSION_RESUME_MS;
+            SESSION_RESUME_MS = 0L;
+            player.seekTo(resume);
+        }
+        // 缓冲续接暂时关闭：过于激进会反复重建播放源导致卡死
         Log.d(TAG, "startPlayback: parentGuid=" + parentGuid + " episodeLoaded=" + (episodeManager != null && episodeManager.isLoaded()) + " loadingEp=" + (episodeManager != null && episodeManager.isLoading()));
         if (parentGuid != null && !parentGuid.isEmpty() && episodeManager != null && !episodeManager.isLoaded() && !episodeManager.isLoading())
             episodeManager.loadList(parentGuid);
@@ -907,6 +1060,49 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     /** 硬解失败后切到软解，重新创建播放器 */
+    /** 本次播放内切换硬/软解：与设置里的软解同一条路（扩展渲染器偏好），不写配置 */
+    private void recreatePlayerForDecode(final boolean software, final long resumeMs) {
+        try {
+            if (player != null) { player.stop(); player.release(); player = null; }
+            DefaultRenderersFactory rf = new DefaultRenderersFactory(this);
+            rf.setExtensionRendererMode(software
+                    ? DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
+                    : DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON);
+            player = new SimpleExoPlayer.Builder(this, rf)
+                    .setTrackSelector(new DefaultTrackSelector(this))
+                    .setLoadControl(createLoadControl())
+                    .build();
+            playerView.setPlayer(player);
+            playerView.setUseController(false);
+            cloudStreamManager.setPlayer(player);
+            actualVideoDecoder = "";
+            player.addAnalyticsListener(new com.google.android.exoplayer2.analytics.AnalyticsListener() {
+                @Override public void onVideoDecoderInitialized(EventTime eventTime, String decoderName,
+                                                               long initializedTimestampMs, long initializationDurationMs) {
+                    actualVideoDecoder = decoderName;
+                    Log.d(TAG, "切换后解码器: " + decoderName);
+                }
+            });
+            String url = savedPlaybackUrl != null ? savedPlaybackUrl : "";
+            if (url.contains(".m3u8")) {
+                player.setMediaSource(new com.google.android.exoplayer2.source.hls.HlsMediaSource.Factory(
+                        () -> new OkHttpExoDataSource(apiManager.getStreamClient()))
+                        .createMediaSource(MediaItem.fromUri(url)));
+            } else {
+                player.setMediaSource(new com.google.android.exoplayer2.source.ProgressiveMediaSource.Factory(
+                        () -> new OkHttpExoDataSource(apiManager.getStreamClient()),
+                        new DefaultExtractorsFactory()).createMediaSource(MediaItem.fromUri(url)));
+            }
+            player.prepare();
+            player.setPlayWhenReady(true);
+            if (resumeMs > 0) player.seekTo(resumeMs);
+            handler.postDelayed(this::updateInfo, 1500);
+        } catch (Exception e) {
+            Log.e(TAG, "切换解码失败: " + e.getMessage());
+        }
+    }
+
+
     private void recreatePlayerWithSwDecoder() {
         if (player != null) {
             player.stop();
@@ -939,7 +1135,7 @@ public class PlayerActivity extends AppCompatActivity {
                         return !google.isEmpty() ? google : all;
                     }
                 };
-                super.buildVideoRenderers(context, extensionRendererMode, googleOnly, enableDecoderFallback,
+                super.buildVideoRenderers(context, extensionRendererMode, com.google.android.exoplayer2.mediacodec.MediaCodecSelector.DEFAULT, enableDecoderFallback,
                         eventHandler, eventListener, allowedVideoJoiningTimeMs, out);
             }
         };
@@ -993,6 +1189,28 @@ public class PlayerActivity extends AppCompatActivity {
             Log.d(TAG, "已切 Google 软解重试: " + savedPlaybackUrl);
         }
     }
+
+    /** Google 软件解码器筛选器（omx.google.* / c2.android.*） */
+    private com.google.android.exoplayer2.mediacodec.MediaCodecSelector googleSoftwareSelector() {
+        return new com.google.android.exoplayer2.mediacodec.MediaCodecSelector() {
+            @Override
+            public java.util.List<com.google.android.exoplayer2.mediacodec.MediaCodecInfo> getDecoderInfos(
+                    String mimeType, boolean requiresSecureDecoder, boolean requiresTunnelingDecoder)
+                    throws com.google.android.exoplayer2.mediacodec.MediaCodecUtil.DecoderQueryException {
+                java.util.List<com.google.android.exoplayer2.mediacodec.MediaCodecInfo> all =
+                        com.google.android.exoplayer2.mediacodec.MediaCodecSelector.DEFAULT
+                                .getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder);
+                java.util.List<com.google.android.exoplayer2.mediacodec.MediaCodecInfo> google = new java.util.ArrayList<>();
+                for (com.google.android.exoplayer2.mediacodec.MediaCodecInfo info : all) {
+                    if (info.name.startsWith("omx.google.") || info.name.startsWith("c2.android.")) {
+                        google.add(info);
+                    }
+                }
+                return google.isEmpty() ? all : google;
+            }
+        };
+    }
+
 
     // ========== 剧集移至 EpisodeManager ==========
 
@@ -1569,6 +1787,12 @@ public class PlayerActivity extends AppCompatActivity {
         if (d.contains("ffmpeg")) return "FFmpeg 软解";
         if (d.startsWith("c2.android") || d.startsWith("omx.google")
                 || d.startsWith("omx.ffmpeg") || d.contains("software")) return "系统软解";
+        // 常见厂商硬解前缀
+        if (d.startsWith("omx.qcom") || d.startsWith("c2.qti") || d.startsWith("omx.mtk")
+                || d.startsWith("c2.mtk") || d.startsWith("omx.hisi") || d.startsWith("c2.hisi")
+                || d.startsWith("omx.exynos") || d.startsWith("c2.exynos") || d.startsWith("omx.nvidia")
+                || d.startsWith("c2.nvidia") || d.startsWith("omx.amlogic") || d.startsWith("c2.amlogic")
+                || d.startsWith("omx.rockchip") || d.startsWith("c2.rockchip")) return "硬解";
         return "硬解";
     }
 
@@ -1582,6 +1806,9 @@ public class PlayerActivity extends AppCompatActivity {
         v.append("视频\n");
         String codec = FormatUtils.fmtVideoCodec(streamVCodec.isEmpty() ? (vf != null ? vf.codecs : null) : streamVCodec);
         v.append("编码 ").append(codec).append("\n");
+        if (actualVideoDecoder != null && !actualVideoDecoder.isEmpty()) {
+            v.append("解码器 ").append(actualVideoDecoder).append("\n");
+        }
         // 优先用 ExoPlayer 实际解码的格式（切换画质后自动更新）
         int w = vf != null && vf.width > 0 ? vf.width : streamVWidth;
         int h = vf != null && vf.height > 0 ? vf.height : streamVHeight;
