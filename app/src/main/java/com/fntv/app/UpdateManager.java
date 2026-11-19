@@ -29,7 +29,7 @@ public class UpdateManager {
 
     /** 更新源（按优先级） */
     private static final String[] UPDATE_URLS = {
-            "https://raw.giteeusercontent.com/coffee710/fntv/raw/master/update.json",
+            "https://raw.githubusercontent.com/YunJian101/fnos_tv_danmu/master/update.json",
             "https://jsd.onmicrosoft.cn/gh/YunJian101/fnos_tv_danmu@master/update.json",
             "https://cdn.jsdelivr.net/gh/YunJian101/fnos_tv_danmu@master/update.json",
             "https://fastly.jsdelivr.net/gh/YunJian101/fnos_tv_danmu@master/update.json",
