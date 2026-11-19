@@ -1899,6 +1899,7 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     @Override protected void onPause() {
+        try { setResult(RESULT_OK); } catch (Exception ignored) { }   // 告诉上一页播放过，回来必须刷新
         super.onPause();
         restoreOrientation();
     }

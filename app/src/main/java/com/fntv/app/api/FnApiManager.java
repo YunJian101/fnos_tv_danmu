@@ -27,6 +27,7 @@ public class FnApiManager {
     public static void invalidateApi(String contains) {
         if (contains == null) return;
         RESP_CACHE.keySet().removeIf(k -> k.contains(contains));
+        INVALID.put(contains, System.currentTimeMillis());
         RESP_TIME.keySet().removeIf(k -> k.contains(contains));
     }
 
@@ -36,6 +37,17 @@ public class FnApiManager {
     }
 
     private static java.io.File apiDir = null;
+
+    /** 刚被失效的接口路径片段（15 秒内磁盘缓存也不读） */
+    private static final java.util.Map<String, Long> INVALID = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static boolean recentlyInvalidated(String path) {
+        long now = System.currentTimeMillis();
+        for (java.util.Map.Entry<String, Long> e : INVALID.entrySet()) {
+            if (now - e.getValue() < 15000 && path.contains(e.getKey())) return true;
+        }
+        return false;
+    }
 
     /** 由 Activity 启动时调用，给接口磁盘缓存一个目录 */
     public static void initDiskCache(android.content.Context ctx) {
@@ -69,6 +81,7 @@ public class FnApiManager {
 
     private static String readDisk(String key, String path) {
         if (apiDir == null) return null;
+        if (recentlyInvalidated(path)) return null;   // 刚失效过：连磁盘也别用
         java.io.File f = new java.io.File(apiDir, diskKey(key) + ".json");
         if (!f.exists()) return null;
         if (System.currentTimeMillis() - f.lastModified() > ttlOf(path) * 1000L) return null;

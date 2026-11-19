@@ -53,10 +53,13 @@ public class DetailActivity extends AppCompatActivity {
     private String guid, title, tvTitle, poster, category, overview, vote, type, parentGuid;
     private int episodeNumber, seasonNumber, numberOfSeasons, numberOfEpisodes;
     private long ts, duration;
+    private String pendingGuid, pendingTitle, pendingTvTitle;
+    private int pendingEpisode;
 
     private LinearLayout metaRow, seasonSection, castRow, videoSection, fileSection, continueRow;
+    private android.widget.HorizontalScrollView continueHsv;
     private View castHeader, videoHeader, fileHeader, seasonTitle, continueHeader, continueScroll;
-    private TextView overviewView, subtitleView;
+    private TextView overviewView, subtitleView, durationView, dateView;
     private LinearLayout specRow;
     private List<PlayListItem> seasons = new ArrayList<>();
     private boolean isSeries = false;
@@ -127,6 +130,17 @@ public class DetailActivity extends AppCompatActivity {
         }
         FnApiManager.invalidateApi("/play/list");
         FnApiManager.invalidateApi("/play/info");
+        // 刚从 rail 播过某集：立即按那一集刷新头部，不必等服务端
+        if (pendingGuid != null) {
+            PlayListItem p = new PlayListItem();
+            p.guid = pendingGuid;
+            p.title = pendingTitle;
+            p.tvTitle = pendingTvTitle;
+            p.episodeNumber = pendingEpisode;
+            p.seasonNumber = seasonNumber;
+            applyResumeHeader(p);
+            if (pendingGuid.equals(guid) == false) guid = guid;   // 保持详情页本身不变
+        }
         // 只更新「继续（剩余…）」按钮和续播集，不动下面的卡片列表，避免整块重绘闪烁
         container.postDelayed(new Runnable() {
             @Override public void run() { refreshPlayState(); }
@@ -135,6 +149,117 @@ public class DetailActivity extends AppCompatActivity {
 
     /** 局部刷新：只更新续播记录与播放按钮文字，卡片列表保持原样 */
     private void refreshPlayState() {
+        // 退出播放器后 1 秒再补拉一次，避开服务端落库延迟
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(new Runnable() {
+            @Override public void run() {
+                if (!isFinishing()) refreshPlayStateOnce();
+            }
+        }, 1000);
+    }
+
+    /** 续播项变化时，把头部的季集/集名/简介一起刷新，避免"只有按钮在动" */
+    /** 规格胶囊跟着续播集变化：重新拉这一集的流信息再重画 */
+    /** 把「继续观看」横条直接定位到当前续播集（不依赖滚动动画，多次重试防布局未完成） */
+    private void positionContinueRail() {
+        final int[] delays = {80, 260, 600, 1100};
+        for (int i = 0; i < delays.length; i++) {
+            continueRow.postDelayed(new Runnable() {
+                @Override public void run() {
+                    if (isFinishing() || continueHsv == null || resumeItem == null
+                            || resumeItem.guid == null) return;
+                    for (int k = 0; k < continueRow.getChildCount(); k++) {
+                        View c = continueRow.getChildAt(k);
+                        Object tag = c.getTag();
+                        if (tag instanceof String
+                                && ((String) tag).equals("fntv_guid:" + resumeItem.guid)) {
+                            int[] rowPos = new int[2];
+                            int[] cardPos = new int[2];
+                            continueRow.getLocationInWindow(rowPos);
+                            c.getLocationInWindow(cardPos);
+                            continueHsv.scrollTo(Math.max(0, cardPos[0] - rowPos[0]), 0);
+                            break;
+                        }
+                    }
+                }
+            }, delays[i]);
+        }
+    }
+
+    private void refreshSpecs(String episodeGuid) {
+        if (episodeGuid == null || episodeGuid.isEmpty() || specRow == null) return;
+        api.getApi().getStreamList(episodeGuid).enqueue(new Callback<ApiResponse<StreamListData>>() {
+            @Override
+            public void onResponse(Call<ApiResponse<StreamListData>> call,
+                                   Response<ApiResponse<StreamListData>> response) {
+                if (!response.isSuccessful() || response.body() == null
+                        || response.body().code != 0 || response.body().data == null) return;
+                StreamListData d = response.body().data;
+                specRow.removeAllViews();
+                if (d.videoStreams != null && !d.videoStreams.isEmpty()) {
+                    StreamListData.VideoStream v = d.videoStreams.get(0);
+                    StringBuilder sb = new StringBuilder();
+                    if (v.resolutionType != null) sb.append(v.resolutionType.toUpperCase());
+                    if (v.colorRangeType != null && !v.colorRangeType.isEmpty()) {
+                        if (sb.length() > 0) sb.append(" ");
+                        sb.append(v.colorRangeType);
+                    }
+                    if (sb.length() > 0) specRow.addView(specChip(sb.toString(), true));
+                }
+                if (d.audioStreams != null && !d.audioStreams.isEmpty()) {
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = 0; i < Math.min(2, d.audioStreams.size()); i++) {
+                        if (d.audioStreams.get(i) == null) continue;
+                        String codec = d.audioStreams.get(i).audioType != null
+                                ? d.audioStreams.get(i).audioType
+                                : d.audioStreams.get(i).codecName;
+                        if (codec == null || codec.isEmpty()) continue;
+                        if (sb.length() > 0) sb.append(" / ");
+                        sb.append(codec);
+                    }
+                    if (sb.length() > 0) specRow.addView(specChip(sb.toString(), false));
+                }
+            }
+
+            @Override
+            public void onFailure(Call<ApiResponse<StreamListData>> call, Throwable t) { }
+        });
+    }
+
+    /** 续播项变化时刷新头部：集名用 title（tvTitle 是剧名，不能当集名） */
+    private void applyResumeHeader(PlayListItem it) {
+        try {
+            String series = it.tvTitle != null && !it.tvTitle.isEmpty() ? it.tvTitle : it.title;
+            String epName = it.title != null ? it.title : "";
+            if (epName.equals(series)) epName = "";
+            if (subtitleView != null && it.episodeNumber > 0) {
+                StringBuilder sb = new StringBuilder();
+                sb.append("S").append(it.seasonNumber > 0 ? it.seasonNumber : 1)
+                  .append("E").append(it.episodeNumber);
+                if (!epName.isEmpty()) sb.append("：").append(epName);
+                subtitleView.setText(sb.toString());
+            } else if (subtitleView != null && !epName.isEmpty()) {
+                subtitleView.setText(epName);
+            }
+            if (overviewView != null && it.overview != null && !it.overview.isEmpty()) {
+                overviewView.setText(it.overview);
+            }
+            if (durationView != null && it.duration > 0) {
+                durationView.setText(cnDuration(it.duration));
+            }
+            if (dateView != null && it.airDate != null && !it.airDate.isEmpty()) {
+                dateView.setText(it.airDate.replace("-", "/"));
+            }
+            // 规格标签也是按集算的（4K / HDR / 音频编码），换集就要重画
+            if (it.guid != null && !it.guid.equals(guid)) {
+                refreshSpecs(it.guid);
+            }
+        } catch (Exception ignored) { }
+    }
+
+    private void refreshPlayStateOnce() {
+        // 从播放器回来必须拿最新进度，否则 30 秒 TTL 内会命中旧缓存
+        com.fntv.app.api.FnApiManager.invalidateApi("/play/list");
+        com.fntv.app.api.FnApiManager.invalidateApi("/play/info");
         api.getApi().getPlayList().enqueue(new Callback<ApiResponse<List<PlayListItem>>>() {
             @Override
             public void onResponse(Call<ApiResponse<List<PlayListItem>>> call,
@@ -144,12 +269,23 @@ public class DetailActivity extends AppCompatActivity {
                 String name = displayTitle();
                 for (PlayListItem it : response.body().data) {
                     if (it == null) continue;
+                    // 从季页播放时，续播项是"某一集"，要按 parentGuid 归到本剧
+                    String dTitle = displayTitle();
+                    boolean sameSeries = (guid != null && (guid.equals(it.guid)
+                            || guid.equals(it.parentGuid)))
+                            || (parentGuid != null && (parentGuid.equals(it.parentGuid)
+                            || parentGuid.equals(it.guid)))
+                            || (it.tvTitle != null && dTitle != null
+                            && (it.tvTitle.contains(dTitle) || dTitle.contains(it.tvTitle)))
+                            || (pendingGuid != null && pendingGuid.equals(it.guid));
+                    if (!sameSeries) continue;
                     String t = it.tvTitle != null && !it.tvTitle.isEmpty() ? it.tvTitle : it.title;
                     boolean sameTitle = t != null && t.equals(name);
                     boolean sameSeason = it.parentGuid != null && seasonGuids.contains(it.parentGuid);
                     if (sameTitle || sameSeason) {
                         resumeItem = it;
                         ts = it.ts;
+                        applyResumeHeader(it);
                         updatePlayButton();
                         return;
                     }
@@ -281,6 +417,9 @@ public class DetailActivity extends AppCompatActivity {
         container.addView(continueHeader);
         continueRow = Ui.row(this);
         continueScroll = Ui.rail(this, continueRow);
+        if (continueScroll instanceof android.widget.HorizontalScrollView) {
+            continueHsv = (android.widget.HorizontalScrollView) continueScroll;
+        }
         container.addView(continueScroll);
         continueHeader.setVisibility(View.GONE);
         continueScroll.setVisibility(View.GONE);
@@ -338,8 +477,14 @@ public class DetailActivity extends AppCompatActivity {
         List<String> bits = new ArrayList<>();
         if (isEpisode) {
             // 单集：上面已经写了 S1E1，这里只留 播出日期 + 时长
-            if (airDate != null && !airDate.isEmpty()) bits.add(airDate.replace("-", "/"));
-            if (duration > 0) bits.add(cnDuration(duration));
+            if (airDate != null && !airDate.isEmpty()) {
+                dateView = Ui.text(this, airDate.replace("-", "/"), 19, R.color.ui_text3, false);
+                bits.add("__DATE__");
+            }
+            if (duration > 0) {
+                durationView = Ui.text(this, cnDuration(duration), 19, R.color.ui_text3, false);
+                bits.add("__DUR__");   // 占位，下面用真正的控件替换
+            }
         } else {
             if (seasonNumber > 0) bits.add("第 " + seasonNumber + " 季");
             if (numberOfEpisodes > 0) bits.add(numberOfEpisodes + " 集");
@@ -347,6 +492,34 @@ public class DetailActivity extends AppCompatActivity {
         }
         boolean first = metaRow.getChildCount() == 0;
         for (String b : bits) {
+            if ("__DATE__".equals(b)) {
+                if (!first) {
+                    TextView sepD = Ui.text(this, "·", 19, R.color.ui_text3, false);
+                    LinearLayout.LayoutParams spD = new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    spD.leftMargin = Ui.dp(this, 12);
+                    spD.rightMargin = Ui.dp(this, 12);
+                    sepD.setLayoutParams(spD);
+                    metaRow.addView(sepD);
+                }
+                metaRow.addView(dateView);
+                first = false;
+                continue;
+            }
+            if ("__DUR__".equals(b)) {
+                if (!first) {
+                    TextView sep0 = Ui.text(this, "·", 19, R.color.ui_text3, false);
+                    LinearLayout.LayoutParams sp0 = new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    sp0.leftMargin = Ui.dp(this, 12);
+                    sp0.rightMargin = Ui.dp(this, 12);
+                    sep0.setLayoutParams(sp0);
+                    metaRow.addView(sep0);
+                }
+                metaRow.addView(durationView);
+                first = false;
+                continue;
+            }
             if (!first) {
                 TextView sep = Ui.text(this, "·", 19, R.color.ui_text3, false);
                 LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(
@@ -583,9 +756,11 @@ public class DetailActivity extends AppCompatActivity {
                     LinearLayout.LayoutParams lp =
                             (LinearLayout.LayoutParams) card.getLayoutParams();
                     lp.rightMargin = Ui.dp(DetailActivity.this, 14);
+                    if (ep.guid != null) card.setTag("fntv_guid:" + ep.guid);
                     continueRow.addView(card);
                     if (current) focusTarget = card;
                 }
+                positionContinueRail();
                 // 进详情页优先聚焦「播放/继续」按钮，而不是某一集
                 final View f = focusTarget;
                 f.post(new Runnable() {
@@ -1192,6 +1367,11 @@ public class DetailActivity extends AppCompatActivity {
     }
 
     private void play(String g, String t, String tv, int ep, String po, long start, long dur) {
+        // 记住这次是从哪一集播的，返回时优先用它刷新头部
+        pendingGuid = g;
+        pendingTitle = t;
+        pendingTvTitle = tv;
+        pendingEpisode = ep;
         Intent intent = new Intent(this, PlayerActivity.class);
         intent.putExtra("guid", g);
         intent.putExtra("title", t);

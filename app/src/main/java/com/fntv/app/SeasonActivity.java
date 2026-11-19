@@ -41,6 +41,20 @@ public class SeasonActivity extends AppCompatActivity {
     private int seasonNumber;
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        // 从播放器退回来：进度可能变了，失效缓存后重新拉一次
+        com.fntv.app.api.FnApiManager.invalidateApi("/play/list");
+        com.fntv.app.api.FnApiManager.invalidateApi("/play/info");
+        if (everResumed) {
+            loadEpisodes();
+        }
+        everResumed = true;
+    }
+
+    private boolean everResumed = false;
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         Theme.applySaved(this);
         super.onCreate(savedInstanceState);
@@ -134,6 +148,7 @@ public class SeasonActivity extends AppCompatActivity {
                     slots.add(slot);
                 }
                 materializeAround(0);
+                positionToResume(eps);   // 打开就定位到当前在看的那一集
                 episodeScroll.setOnScrollChangeListener(new View.OnScrollChangeListener() {
                     @Override public void onScrollChange(View v, int sx, int sy, int ox, int oy) {
                         int first = sy / Ui.dp(SeasonActivity.this, 184);
@@ -180,6 +195,47 @@ public class SeasonActivity extends AppCompatActivity {
         }
     }
     private int renderedIdx = 0;
+
+    /** 找到续播集并把列表滚过去（纵向），同时把该位置附近的行物化出来 */
+    private void positionToResume(final List<PlayListItem> eps) {
+        com.fntv.app.api.FnApiManager.invalidateApi("/play/list");
+        api.getApi().getPlayList().enqueue(new Callback<ApiResponse<List<PlayListItem>>>() {
+            @Override
+            public void onResponse(Call<ApiResponse<List<PlayListItem>>> c,
+                                   Response<ApiResponse<List<PlayListItem>>> r) {
+                if (!r.isSuccessful() || r.body() == null || r.body().code != 0
+                        || r.body().data == null) return;
+                String cur = null;
+                for (PlayListItem it : r.body().data) {
+                    if (it == null || it.guid == null) continue;
+                    for (PlayListItem ep : eps) {
+                        if (ep != null && it.guid.equals(ep.guid)) { cur = it.guid; break; }
+                    }
+                    if (cur != null) break;
+                }
+                if (cur == null) return;
+                int index = 0;
+                for (int i = 0; i < eps.size(); i++) {
+                    if (cur.equals(eps.get(i).guid)) { index = i; break; }
+                }
+                final int idx = index;
+                android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+                for (int delay : new int[]{80, 300, 700}) {
+                    h.postDelayed(new Runnable() {
+                        @Override public void run() {
+                            if (isFinishing() || episodeScroll == null) return;
+                            int rowH = Ui.dp(SeasonActivity.this, 170) + Ui.dp(SeasonActivity.this, 14);
+                            materializeAround(idx);
+                            episodeScroll.scrollTo(0, Math.max(0, idx * rowH - rowH / 2));
+                        }
+                    }, delay);
+                }
+            }
+
+            @Override
+            public void onFailure(Call<ApiResponse<List<PlayListItem>>> c, Throwable t) { }
+        });
+    }
 
     private void renderChunk(int count) {
         if (pendingEps == null) return;

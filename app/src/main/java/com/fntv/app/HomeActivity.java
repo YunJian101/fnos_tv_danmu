@@ -50,20 +50,14 @@ public class HomeActivity extends AppCompatActivity {
     private String baseUrl;
 
     private ScrollView scrollHome;
-    private View panelLibrary, panelSettings;
-    private LinearLayout homeContainer, libraryContainer, libBarRow, settingsContainer;
-    private ImageView btnGear, btnSearch, btnLibBack, btnSetBack;
-    private TextView tvLibTitle;
-    private EditText etSearch;
+    private View panelSettings;
+    private LinearLayout homeContainer, settingsContainer;
+    private ImageView btnGear, btnSearch, btnSetBack;
 
     private int currentTab = 0;
     private final List<MediaDbItem> libraries = new ArrayList<>();
     private final Map<String, List<PlayListItem>> rails = new HashMap<>();
     private List<PlayListItem> continueList = new ArrayList<>();
-    private String selectedLibGuid = null;
-    private String selectedLibTitle = "媒体库";
-    private boolean selectedLibLive = false;
-    private int sortBy = 0; // 0=更新时间(create_time DESC) 1=名称(sort_title ASC)
     private boolean railsRequested = false;
     private String homeSig = null;   // 首页数据指纹，未变化就不重绘
     private final java.util.List<String> continueGuids = new java.util.ArrayList<>();
@@ -94,68 +88,25 @@ public class HomeActivity extends AppCompatActivity {
         if (api.getApi() == null && !baseUrl.isEmpty()) api.updateBaseUrl(baseUrl);
 
         scrollHome = findViewById(R.id.scrollHome);
-        panelLibrary = findViewById(R.id.panelLibrary);
         panelSettings = findViewById(R.id.panelSettings);
         homeContainer = findViewById(R.id.homeContainer);
-        libraryContainer = findViewById(R.id.libraryContainer);
-        libBarRow = findViewById(R.id.libBarRow);
         settingsContainer = findViewById(R.id.settingsContainer);
         btnGear = findViewById(R.id.btnGear);
         btnSearch = findViewById(R.id.btnSearch);
-        btnLibBack = findViewById(R.id.btnLibBack);
         btnSetBack = findViewById(R.id.btnSetBack);
-        tvLibTitle = findViewById(R.id.tvLibTitle);
-        etSearch = findViewById(R.id.etSearch);
 
         btnGear.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { switchTab(2); }
         });
         btnSearch.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                if (libraries.isEmpty()) { switchTab(1); return; }
-                if (selectedLibGuid == null) openLibrary(libraries.get(0));
-                else switchTab(1);
-                etSearch.setFocusable(true);
-                etSearch.setFocusableInTouchMode(true);
-                etSearch.postDelayed(new Runnable() {
-                    @Override public void run() {
-                        etSearch.requestFocus();
-                        android.view.inputmethod.InputMethodManager imm =
-                                (android.view.inputmethod.InputMethodManager)
-                                        getSystemService(INPUT_METHOD_SERVICE);
-                        if (imm != null) imm.showSoftInput(etSearch, 0);
-                    }
-                }, 120);
-            }
-        });
-        btnLibBack.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { switchTab(0); }
+            @Override public void onClick(View v) { startSearch(); }
         });
         btnSetBack.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { switchTab(0); }
         });
         Ui.focusEffect(btnGear);
         Ui.focusEffect(btnSearch);
-        Ui.focusEffect(btnLibBack);
         Ui.focusEffect(btnSetBack);
-
-        // 搜索框平时不参与遥控器焦点，只有点搜索图标时才临时获取焦点
-        etSearch.setOnFocusChangeListener(new View.OnFocusChangeListener() {
-            @Override public void onFocusChange(View v, boolean has) {
-                if (!has) etSearch.setFocusable(false);
-            }
-        });
-
-        etSearch.setOnEditorActionListener(new TextView.OnEditorActionListener() {
-            @Override
-            public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
-                if (actionId == EditorInfo.IME_ACTION_SEARCH) {
-                    doSearch(v.getText().toString().trim());
-                    return true;
-                }
-                return false;
-            }
-        });
 
         switchTab(0);
         loadHome();
@@ -168,7 +119,14 @@ public class HomeActivity extends AppCompatActivity {
         // 回到首页必须拿最新的播放记录，否则「继续观看」是旧的
         com.fntv.app.api.FnApiManager.invalidateApi("/play/list");
         com.fntv.app.api.FnApiManager.invalidateApi("/play/info");
+        forceContinueRefresh = true;   // 只要是从播放器/详情页回来，继续观看一定变了
         loadContinue();
+        // 播放器退出瞬间服务端可能还没落库，1 秒后补拉一次
+        homeContainer.postDelayed(new Runnable() {
+            @Override public void run() {
+                if (!isFinishing() && currentTab == 0) loadContinue();
+            }
+        }, 1000);
         userTouched = false;
         restorePosition();
     }
@@ -269,17 +227,14 @@ public class HomeActivity extends AppCompatActivity {
         // 首页的搜索/设置是悬浮图标，进二级页时一起隐藏，避免抢焦点
         btnGear.setVisibility(index == 0 ? View.VISIBLE : View.GONE);
         btnSearch.setVisibility(index == 0 ? View.VISIBLE : View.GONE);
-        panelLibrary.setVisibility(index == 1 ? View.VISIBLE : View.GONE);
         panelSettings.setVisibility(index == 2 ? View.VISIBLE : View.GONE);
-        if (index == 1) {
-            btnLibBack.requestFocus();
-        } else if (index == 2) {
+        if (index == 2) {
             btnSetBack.requestFocus();
         } else {
             btnGear.requestFocus();
         }
         // 面板切换后焦点有可能被清空，延迟兜底一次
-        final View fallback = index == 1 ? btnLibBack : (index == 2 ? btnSetBack : btnGear);
+        final View fallback = index == 2 ? btnSetBack : btnGear;
         fallback.postDelayed(new Runnable() {
             @Override public void run() {
                 View root = getWindow().getDecorView();
@@ -336,6 +291,8 @@ public class HomeActivity extends AppCompatActivity {
         return null;
     }
 
+    private boolean forceContinueRefresh = false;
+
     private void loadContinue() {
         api.getApi().getPlayList().enqueue(new Callback<ApiResponse<List<PlayListItem>>>() {
             @Override
@@ -349,13 +306,14 @@ public class HomeActivity extends AppCompatActivity {
                         if (it == null) continue;
                         sigB.append(it.guid).append(':').append(it.ts).append('|');
                     }
-                    if (sigB.toString().equals(homeSig) && scrollHome.getChildCount() > 0) {
+                    if (!forceContinueRefresh && sigB.toString().equals(homeSig) && scrollHome.getChildCount() > 0) {
                         return;
                     }
                     // 走增量 diff：新增插入、消失移除、顺序变化只移动视图，不整页重建
                     if (continueRowView != null && continueRowView.getChildCount() > 0) {
                         applyContinueDiff(response.body().data);
                         homeSig = sigB.toString();
+                        forceContinueRefresh = false;
                         return;
                     }
                     homeSig = sigB.toString();
@@ -380,12 +338,8 @@ public class HomeActivity extends AppCompatActivity {
                 }
                 libraries.clear();
                 libraries.addAll(response.body().data);
-                if (selectedLibGuid == null && !libraries.isEmpty()) {
-                    MediaDbItem first = libraries.get(0);
-                    selectedLibGuid = first.guid;
-                    selectedLibTitle = first.title == null ? "媒体库" : first.title;
-                    selectedLibLive = isLive(first);
-                }
+                    com.fntv.app.data.MediaStore.libraries.clear();
+                    com.fntv.app.data.MediaStore.libraries.addAll(libraries);
                 loadRails();
                 renderHome();
             }
@@ -417,6 +371,8 @@ public class HomeActivity extends AppCompatActivity {
                                     && response.body().code == 0 && response.body().data != null
                                     && response.body().data.list != null) {
                                 rails.put(lib.guid, response.body().data.list);
+                    com.fntv.app.data.MediaStore.rails.put(lib.guid, response.body().data.list);
+                    com.fntv.app.data.MediaStore.putList(lib.guid, 0, response.body().data.list);
                                 renderHome();
                             }
                         }
@@ -489,8 +445,8 @@ public class HomeActivity extends AppCompatActivity {
         int pct = it.duration > 0 ? (int) (it.ts * 100 / it.duration) : 0;
         long remain = it.duration > 0 ? Math.max(0, it.duration - it.ts) : 0;
         String badge = remain > 0 ? Ui.remainingText(remain) : "未开始";
-        String sub = it.duration > 0 ? Ui.formatDuration(it.duration) : subOf(it);
-        View card = Ui.wideCard(this, it.getDisplayTitle(), sub,
+        String sub = continueSubtitle(it);
+        View card = Ui.wideCard(this, continueSeries(it), sub,
                 Ui.posterUrl(baseUrl, it.poster), badge, pct, 320, 180,
                 new View.OnClickListener() {
                     @Override public void onClick(View v) { openDetail(it); }
@@ -614,12 +570,12 @@ public class HomeActivity extends AppCompatActivity {
 
     private void openLibrary(MediaDbItem lib) {
         if (lib == null) return;
-        selectedLibGuid = lib.guid;
-        selectedLibTitle = lib.title == null ? "媒体库" : lib.title;
-        selectedLibLive = isLive(lib);
-        tvLibTitle.setText(selectedLibTitle);
-        switchTab(1);
-        loadLibraryItems(selectedLibGuid, selectedLibTitle);
+        // 独立 Activity：真正的页面转场，返回首页时 onResume 会刷新播放记录
+        Intent i = new Intent(this, LibraryActivity.class);
+        i.putExtra("lib_guid", lib.guid);
+        i.putExtra("lib_title", lib.title == null ? "媒体库" : lib.title);
+        i.putExtra("lib_live", isLive(lib));
+        startActivity(i);
     }
 
     /** 列表请求：sortBy 0=更新时间(create_time DESC) 1=名称(sort_title ASC) */
@@ -632,220 +588,33 @@ public class HomeActivity extends AppCompatActivity {
                 60);
     }
 
-    private void loadLibraryItems(String guid, String title) {
-        if (guid == null) return;
-        libraryContainer.removeAllViews();
-        libraryContainer.addView(Ui.text(this, "加载中…", 15, R.color.ui_text3, false));
-        Call<ApiResponse<ItemListResponse>> call = selectedLibLive
-                ? api.getApi().getItemList(ItemListRequest.browseLiveChannels())
-                : api.getApi().getItemList(listRequest(guid, sortBy));
-        call.enqueue(new Callback<ApiResponse<ItemListResponse>>() {
-            @Override
-            public void onResponse(Call<ApiResponse<ItemListResponse>> call,
-                                   Response<ApiResponse<ItemListResponse>> response) {
-                libraryContainer.removeAllViews();
-                if (!response.isSuccessful() || response.body() == null
-                        || response.body().code != 0 || response.body().data == null
-                        || response.body().data.list == null
-                        || response.body().data.list.isEmpty()) {
-                    updateLibBar(0);
-                    libraryContainer.addView(Ui.text(HomeActivity.this,
-                            selectedLibLive ? "这个直播库是空的" : "这个媒体库是空的",
-                            15, R.color.ui_text3, false));
-                    return;
-                }
-                List<PlayListItem> list = response.body().data.list;
-                updateLibBar(list.size());
-                if (selectedLibLive) renderLiveGrid(list);
-                else renderPosterGrid(list);
-            }
-
-            @Override
-            public void onFailure(Call<ApiResponse<ItemListResponse>> call, Throwable t) {
-                libraryContainer.removeAllViews();
-                libraryContainer.addView(Ui.text(HomeActivity.this, "加载失败: " + t.getMessage(),
-                        15, R.color.ui_text3, false));
-            }
-        });
+    /** 第一行：只要剧名 */
+    private String continueSeries(PlayListItem it) {
+        if (it.tvTitle != null && !it.tvTitle.isEmpty()) return it.tvTitle;
+        return it.title != null ? it.title : "";
     }
 
-    private void renderPosterGrid(List<PlayListItem> list) {
-        List<View> cards = new ArrayList<>();
-        for (final PlayListItem it : list) {
-            if (it == null) continue;
-            cards.add(Ui.posterCard(this, it.getDisplayTitle(), subOf(it),
-                    Ui.posterUrl(baseUrl, it.poster), badgeOf(it), null, 150, 214,
-                    new View.OnClickListener() {
-                        @Override public void onClick(View v) { openDetail(it); }
-                    }));
+    /** 第二行：S01E04：集名（时长不显示） */
+    private String continueSubtitle(PlayListItem it) {
+        String epName = it.title != null ? it.title : "";
+        if (epName.equals(continueSeries(it))) epName = "";
+        if (it.episodeNumber <= 0 && epName.isEmpty()) return it.getCategoryLabel();
+        StringBuilder sb = new StringBuilder();
+        if (it.episodeNumber > 0) {
+            sb.append(String.format(java.util.Locale.US, "S%02dE%02d",
+                    it.seasonNumber > 0 ? it.seasonNumber : 1, it.episodeNumber));
+            if (!epName.isEmpty()) sb.append("：").append(epName);
+        } else {
+            sb.append(epName);
         }
-        Ui.grid(this, libraryContainer, cards, 170, 14);
-        focusFirst(cards);
+        return sb.toString();
     }
+
 
     /** 分批构建媒体库网格：每次追加 rowsPerChunk 行 */
-    private void gridChunked(final java.util.List<View> cards, final int startRow, final int rowsPerChunk) {
-        int widthDp = getResources().getConfiguration().screenWidthDp;
-        int cols = Math.max(3, widthDp / 170);
-        final int start = startRow * cols;
-        if (start >= cards.size()) return;
-        final int end = Math.min(start + cols * rowsPerChunk, cards.size());
-        if (startRow == 0) libraryContainer.removeAllViews();
-        for (int i = start; i < end; i += cols) {
-            LinearLayout line = new LinearLayout(this);
-            line.setOrientation(LinearLayout.HORIZONTAL);
-            line.setClipChildren(false);
-            line.setClipToPadding(false);
-            LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            llp.bottomMargin = Ui.dp(this, 14);
-            line.setLayoutParams(llp);
-            for (int j = 0; j < cols; j++) {
-                int idx = i + j;
-                if (idx >= cards.size()) break;
-                View card = cards.get(idx);
-                if (card.getParent() instanceof android.view.ViewGroup) {
-                    ((android.view.ViewGroup) card.getParent()).removeView(card);
-                }
-                line.addView(card);
-            }
-            libraryContainer.addView(line);
-        }
-        if (end < cards.size()) {
-            libraryContainer.postDelayed(new Runnable() {
-                @Override public void run() {
-                    if (currentTab == 1) gridChunked(cards, startRow + rowsPerChunk, rowsPerChunk);
-                }
-            }, 16);
-        }
-    }
-
     /** 网格渲染完把焦点交给第一张卡片，遥控器直接能上下左右走 */
-    private void focusFirst(List<View> cards) {
-        if (pendingFocus != null) {
-            final View pf = pendingFocus;
-            pendingFocus = null;
-            pf.postDelayed(new Runnable() {
-                @Override public void run() { pf.requestFocus(); }
-            }, 60);
-            return;
-        }
-        if (cards.isEmpty()) return;
-        final View first = cards.get(0);
-        first.postDelayed(new Runnable() {
-            @Override public void run() {
-                if (currentTab != 1) return;
-                if (!first.hasFocus()) first.requestFocus();
-                // 双保险：万一卡片还没布局好，至少让返回键拿到焦点，按键不会失灵
-                if (!first.hasFocus()) {
-                    btnLibBack.requestFocus();
-                }
-            }
-        }, 650);
-    }
-
     /** 直播频道：16:9 台标卡，点开直接播 */
-    private void renderLiveGrid(List<PlayListItem> list) {
-        List<View> cards = new ArrayList<>();
-        for (final PlayListItem it : list) {
-            if (it == null) continue;
-            cards.add(Ui.wideCard(this, it.title == null ? it.getDisplayTitle() : it.title,
-                    "直播", Ui.posterUrl(baseUrl, it.poster), null, 0, 240, 135,
-                    new View.OnClickListener() {
-                        @Override public void onClick(View v) { playItem(it); }
-                    }));
-        }
-        Ui.grid(this, libraryContainer, cards, 260, 14);
-        focusFirst(cards);
-    }
-
     /** 媒体库工具条：共 N 项 + 排序（切换排序会重新请求服务端） */
-    private void updateLibBar(int count) {
-        libBarRow.removeAllViews();
-        libBarRow.addView(Ui.text(this, "共 " + count + " 项", 15, R.color.ui_text3, false));
-
-        View fill = new View(this);
-        fill.setLayoutParams(new LinearLayout.LayoutParams(0, 1, 1f));
-        libBarRow.addView(fill);
-
-        if (selectedLibLive) return;
-
-        TextView t1 = Ui.pill(this, "更新时间", sortBy == 0);
-        TextView t2 = Ui.pill(this, "名称", sortBy == 1);
-        t1.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                if (sortBy == 0) return;
-                sortBy = 0;
-                pendingFocus = t1;
-                loadLibraryItems(selectedLibGuid, selectedLibTitle);
-            }
-        });
-        t2.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                if (sortBy == 1) return;
-                sortBy = 1;
-                pendingFocus = t2;
-                loadLibraryItems(selectedLibGuid, selectedLibTitle);
-            }
-        });
-        Ui.focusEffect(t1);
-        Ui.focusEffect(t2);
-        LinearLayout.LayoutParams lp1 = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp1.rightMargin = Ui.dp(this, 10);
-        t1.setLayoutParams(lp1);
-        libBarRow.addView(t1);
-        libBarRow.addView(t2);
-    }
-
-    private void doSearch(String q) {
-        if (q.isEmpty()) {
-            loadLibraryItems(selectedLibGuid, selectedLibTitle);
-            return;
-        }
-        hideKeyboard();
-        libraryContainer.removeAllViews();
-        libraryContainer.addView(Ui.text(this, "搜索中…", 15, R.color.ui_text3, false));
-        api.getApi().search(q).enqueue(new Callback<ApiResponse<List<PlayListItem>>>() {
-            @Override
-            public void onResponse(Call<ApiResponse<List<PlayListItem>>> call,
-                                   Response<ApiResponse<List<PlayListItem>>> response) {
-                libraryContainer.removeAllViews();
-                if (!response.isSuccessful() || response.body() == null
-                        || response.body().code != 0 || response.body().data == null
-                        || response.body().data.isEmpty()) {
-                    libraryContainer.addView(Ui.text(HomeActivity.this, "没有找到相关内容",
-                            15, R.color.ui_text3, false));
-                    return;
-                }
-                List<View> cards = new ArrayList<>();
-                for (final PlayListItem it : response.body().data) {
-                    if (it == null) continue;
-                    cards.add(Ui.posterCard(HomeActivity.this, it.getDisplayTitle(), subOf(it),
-                            Ui.posterUrl(baseUrl, it.poster), badgeOf(it), null, 150, 214,
-                            new View.OnClickListener() {
-                                @Override public void onClick(View v) { openDetail(it); }
-                            }));
-                }
-                Ui.grid(HomeActivity.this, libraryContainer, cards, 170, 14);
-            }
-
-            @Override
-            public void onFailure(Call<ApiResponse<List<PlayListItem>>> call, Throwable t) {
-                libraryContainer.removeAllViews();
-                libraryContainer.addView(Ui.text(HomeActivity.this, "搜索失败: " + t.getMessage(),
-                        15, R.color.ui_text3, false));
-            }
-        });
-    }
-
-    private void hideKeyboard() {
-        InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
-        if (imm != null && getCurrentFocus() != null) {
-            imm.hideSoftInputFromWindow(getCurrentFocus().getWindowToken(), 0);
-        }
-    }
-
     // ---------------- 文案工具 ----------------
 
     private static String badgeOf(PlayListItem it) {
@@ -1253,4 +1022,11 @@ public class HomeActivity extends AppCompatActivity {
         }
     }
 
+
+    /** 搜索：直接用分类页的搜索模式 */
+    private void startSearch() {
+        Intent i = new Intent(this, LibraryActivity.class);
+        i.putExtra("search_mode", true);
+        startActivity(i);
+    }
 }

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 进入：纯位移，不做透明度动画，避免切换时透出背景闪一下 -->
 <translate xmlns:android="http://schemas.android.com/apk/res/android"
-    android:fromXDelta="6%p"
+    android:fromXDelta="16%p"
     android:toXDelta="0"
-    android:duration="180"
+    android:duration="280"
     android:interpolator="@android:anim/decelerate_interpolator" />

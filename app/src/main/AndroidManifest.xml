@@ -38,6 +38,12 @@
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:screenOrientation="sensor" />
         <activity
+            android:name=".LibraryActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode"
+            android:exported="false"
+            android:theme="@style/Theme.Fntv" />
+
+        <activity
             android:name=".DetailActivity"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:screenOrientation="sensor"

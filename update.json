@@ -1,7 +1,7 @@
 {
-    "versionCode": 152,
-    "versionName": "3.3.6",
-    "apkUrl": "https://github.com/YunJian101/fnos_tv_danmu/releases/download/v3.3.6/FNTV_release_v3.3.6.apk",
-    "changelog": "1. 分季封面与分季背景（每季各自的图）\n2. 季页窗口化渲染（只渲染可见±12行）\n3. 快进/快退秒数可分别设置\n4. 回首页强制刷新播放记录\n5. 更新弹窗自绘",
+    "versionCode": 180,
+    "versionName": "3.6.7",
+    "apkUrl": "https://github.com/YunJian101/fnos_tv_danmu/releases/download/v3.6.7/FNTV_release_v3.6.7.apk",
+    "changelog": "1. 继续观看卡片双行标题（剧名 / S01E04：集名）\n2. 详情页信息随续播集刷新（集名/简介/日期/时长/规格）\n3. 继续观看横条与季页自动定位到当前集\n4. 播放器返回后首页/详情/季页强制刷新\n5. 分类页独立成页、搜索迁入、排序记忆\n6. 图片与接口磁盘缓存 + 自动回收",
     "forceUpdate": false
 }
