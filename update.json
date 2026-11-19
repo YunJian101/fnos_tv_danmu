@@ -1,7 +1,7 @@
 {
-    "versionCode": 206,
-    "versionName": "3.9.3",
-    "apkUrl": "https://github.com/YunJian101/fnos_tv_danmu/releases/download/v3.9.3/FNTV_release_v3.9.3.apk",
-    "changelog": "1. 播放器新增硬解/软解开关（只影响本次播放）\n2. 起播前预检硬件能力，超规格直接服务端转码\n3. 转码参数修正：AAC 输出、按源分辨率/码率\n4. 音频降级不再拖累视频硬解\n5. 首页初始焦点回到内容区\n6. 设置页可查看设备硬件解码器清单",
+    "versionCode": 208,
+    "versionName": "3.9.5",
+    "apkUrl": "https://github.com/YunJian101/fnos_tv_danmu/releases/download/v3.9.5/FNTV_release_v3.9.5.apk",
+    "changelog": "1. 首页分类行骨架屏，不再整页重建\n2. 分类行请求量减到 20 条，加载更快\n3. 播放器硬/软解开关（仅本次播放）\n4. 起播前硬件能力预检，超规格自动转码\n5. 转码参数修正与音频降级优化",
     "forceUpdate": false
 }

@@ -386,7 +386,7 @@ public class HomeActivity extends AppCompatActivity {
         for (int i = 0; i < max; i++) {
             final MediaDbItem lib = libraries.get(i);
             if (lib.guid == null || isLive(lib)) continue;
-            api.getApi().getItemList(listRequest(lib.guid, 0))
+            api.getApi().getItemList(listRequest(lib.guid, 0, 20))
                     .enqueue(new Callback<ApiResponse<ItemListResponse>>() {
                         @Override
                         public void onResponse(Call<ApiResponse<ItemListResponse>> call,
@@ -395,9 +395,9 @@ public class HomeActivity extends AppCompatActivity {
                                     && response.body().code == 0 && response.body().data != null
                                     && response.body().data.list != null) {
                                 rails.put(lib.guid, response.body().data.list);
-                    com.fntv.app.data.MediaStore.rails.put(lib.guid, response.body().data.list);
-                    com.fntv.app.data.MediaStore.putList(lib.guid, 0, response.body().data.list);
-                                renderHome();
+                                com.fntv.app.data.MediaStore.rails.put(lib.guid, response.body().data.list);
+                                com.fntv.app.data.MediaStore.putList(lib.guid, 0, response.body().data.list);
+                                insertRail(lib, response.body().data.list);   // 只更新这一行
                             }
                         }
                         @Override
@@ -433,10 +433,17 @@ public class HomeActivity extends AppCompatActivity {
 
         if (!continueList.isEmpty()) addContinueRail();
 
+        railPlaceholders.clear();
         for (MediaDbItem lib : libraries) {
+            if (lib.guid == null || isLive(lib)) continue;
             List<PlayListItem> items = rails.get(lib.guid);
-            if (items == null || items.isEmpty()) continue;
-            addRail(lib.title == null ? "媒体库" : lib.title, items, lib);
+            if (items != null && !items.isEmpty()) {
+                addRail(lib.title == null ? "媒体库" : lib.title, items, lib);
+            } else {
+                View holder = buildRailSkeleton(lib);      // 先铺骨架
+                railPlaceholders.put(lib.guid, holder);
+                homeContainer.addView(holder);
+            }
         }
 
         scrollHome.post(new Runnable() {
@@ -569,10 +576,45 @@ public class HomeActivity extends AppCompatActivity {
         homeContainer.addView(Ui.rail(this, row));
     }
 
+    /** 某一行数据到了：原地替换骨架，没有骨架就追加 */
+    private final java.util.Map<String, View> railPlaceholders = new java.util.HashMap<>();
+
+    private void insertRail(MediaDbItem lib, List<PlayListItem> items) {
+        if (items == null || items.isEmpty()) return;
+        View ph = railPlaceholders.remove(lib.guid);
+        int at = ph != null ? homeContainer.indexOfChild(ph) : homeContainer.getChildCount();
+        if (ph != null) homeContainer.removeView(ph);
+        addRailAt(lib.title == null ? "媒体库" : lib.title, items, lib, at);
+    }
+
+    /** 分类行骨架：标题 + 一排灰块 */
+    private View buildRailSkeleton(MediaDbItem lib) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.addView(Ui.sectionHeader(this, lib.title == null ? "媒体库" : lib.title, null, null));
+        LinearLayout row = Ui.row(this);
+        for (int i = 0; i < 6; i++) {
+            View block = new View(this);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    Ui.dp(this, 150), Ui.dp(this, 214));
+            lp.rightMargin = Ui.dp(this, 14);
+            block.setLayoutParams(lp);
+            block.setBackground(com.fntv.app.ui.Ui.round(0xFF2A3140, Ui.dp(this, 12)));
+            block.setAlpha(0.30f);
+            row.addView(block);
+        }
+        box.addView(Ui.rail(this, row));
+        return box;
+    }
+
     private void addRail(String title, List<PlayListItem> items, final MediaDbItem lib) {
-        homeContainer.addView(Ui.sectionHeader(this, title, "更多", new View.OnClickListener() {
+        addRailAt(title, items, lib, homeContainer.getChildCount());
+    }
+
+    private void addRailAt(String title, List<PlayListItem> items, final MediaDbItem lib, int at) {
+        View header = Ui.sectionHeader(this, title, "更多", new View.OnClickListener() {
             @Override public void onClick(View v) { openLibrary(lib); }
-        }));
+        });
         LinearLayout row = Ui.row(this);
         int max = Math.min(20, items.size());
         for (int i = 0; i < max; i++) {
@@ -587,7 +629,8 @@ public class HomeActivity extends AppCompatActivity {
             lp.rightMargin = Ui.dp(this, 14);
             row.addView(card);
         }
-        homeContainer.addView(Ui.rail(this, row));
+        homeContainer.addView(header, Math.min(at, homeContainer.getChildCount()));
+        homeContainer.addView(Ui.rail(this, row), Math.min(at + 1, homeContainer.getChildCount()));
     }
 
     // ---------------- 媒体库 ----------------
@@ -604,12 +647,17 @@ public class HomeActivity extends AppCompatActivity {
 
     /** 列表请求：sortBy 0=更新时间(create_time DESC) 1=名称(sort_title ASC) */
     private ItemListRequest listRequest(String guid, int sort) {
+        return listRequest(guid, sort, 60);
+    }
+
+    /** 首页每行只要 20 条，减少响应体积；分类页仍用 60 */
+    private ItemListRequest listRequest(String guid, int sort, int count) {
         return new ItemListRequest(guid,
                 Arrays.asList("Movie", "TV", "Directory", "Video"),
                 true,
                 sort == 1 ? "sort_title" : "create_time",
                 sort == 1 ? "ASC" : "DESC",
-                60);
+                count);
     }
 
     /** 第一行：只要剧名 */
