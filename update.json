@@ -1,7 +1,7 @@
 {
-    "versionCode": 23,
-    "versionName": "1.2.3",
-    "apkUrl": "https://gitee.com/coffee710/fntv/releases/download/v1.2.3/FNTV_release_v1.2.3_20261106_1530.apk",
-    "changelog": "1.新增缓冲下载量显示\n2.修复媒体库不显示的问题",
+    "versionCode": 119,
+    "versionName": "3.0.3",
+    "apkUrl": "https://github.com/YunJian101/fnos_tv_danmu/releases/download/v3.0.3/FNTV_release_v3.0.3.apk",
+    "changelog": "1. 全新 UI：双主题、全自定义控件\n2. 遥控器/键盘焦点导航修复\n3. 弹幕设置面板重做\n4. 播放信息面板重做",
     "forceUpdate": false
-  }
+}
