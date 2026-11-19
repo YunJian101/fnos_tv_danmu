@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Fntv" parent="Theme.AppCompat.NoActionBar">
+        <item name="colorPrimary">@color/ui_accent</item>
+        <item name="colorPrimaryDark">@color/ui_bg</item>
+        <item name="colorAccent">@color/ui_accent</item>
+        <item name="android:windowBackground">@color/ui_bg</item>
+        <item name="android:textColorPrimary">@color/ui_text</item>
+        <item name="android:textColorSecondary">@color/ui_text2</item>
+        <item name="android:alertDialogTheme">@style/Theme.Fntv.Dialog</item>
+        <item name="android:windowAnimationStyle">@style/FntvWindowAnim</item>
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowDisablePreview">false</item>
+    </style>
+    <style name="Theme.Fntv.Dialog" parent="Theme.AppCompat.Dialog">
+        <item name="android:windowBackground">@color/ui_surface</item>
+        <item name="colorAccent">@color/ui_accent</item>
+        <item name="android:textColorPrimary">@color/ui_text</item>
+    </style>
+    <!-- 详情/季页：窗口底色用深色，避免起页时先闪一帧浅色 -->
+    <style name="Theme.Fntv.Detail" parent="Theme.Fntv">
+        <item name="android:windowBackground">#FF0E1118</item>
+    </style>
+
+    <!-- 播放器：窗口底色直接黑，避免起播/退出时闪白；不加切换动画 -->
+    <style name="Theme.Fntv.Player" parent="Theme.Fntv">
+        <item name="android:windowBackground">#FF000000</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowIsTranslucent">false</item>
+    </style>
+
+    <!-- 全局页面切换动画：进入淡入右滑，返回淡出缩放，所有 Activity 统一 -->
+    <style name="FntvWindowAnim" parent="@android:style/Animation.Activity">
+        <item name="android:activityOpenEnterAnimation">@anim/act_enter</item>
+        <item name="android:activityOpenExitAnimation">@anim/act_exit</item>
+        <item name="android:activityCloseEnterAnimation">@anim/act_pop_enter</item>
+        <item name="android:activityCloseExitAnimation">@anim/act_pop_exit</item>
+    </style>
+
+    <style name="FntvTextSection">
+        <item name="android:textColor">@color/ui_text</item>
+        <item name="android:textSize">22sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+    <style name="FntvTextBody">
+        <item name="android:textColor">@color/ui_text2</item>
+        <item name="android:textSize">15sp</item>
+    </style>
+    <style name="PanelRightAnim">
+        <item name="android:windowEnterAnimation">@anim/panel_in_right</item>
+        <item name="android:windowExitAnimation">@anim/panel_out_right</item>
+    </style>
+</resources>

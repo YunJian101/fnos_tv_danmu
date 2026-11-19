@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 中央播放键：圆形蓝底 + 白色图标（聚焦加描边） -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <layer-list>
+            <item>
+                <shape android:shape="oval">
+                    <solid android:color="@color/ui_btn" />
+                    <stroke android:width="3dp" android:color="@color/ui_on_accent" />
+                </shape>
+            </item>
+            <item android:gravity="center">
+                <inset android:inset="26dp" android:drawable="@drawable/ic_play" />
+            </item>
+        </layer-list>
+    </item>
+    <item>
+        <layer-list>
+            <item>
+                <shape android:shape="oval">
+                    <solid android:color="@color/ui_btn" />
+                </shape>
+            </item>
+            <item android:gravity="center">
+                <inset android:inset="26dp" android:drawable="@drawable/ic_play" />
+            </item>
+        </layer-list>
+    </item>
+</selector>

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 胶囊：选中=强调色实心（一眼看出已选）；聚焦=浅底+粗描边（区别于选中） -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/ui_surface2" />
+            <corners android:radius="22dp" />
+            <stroke android:width="3dp" android:color="@color/ui_accent" />
+        </shape>
+    </item>
+    <item android:state_selected="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/ui_accent" />
+            <corners android:radius="22dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/ui_surface2" />
+            <corners android:radius="22dp" />
+        </shape>
+    </item>
+</selector>

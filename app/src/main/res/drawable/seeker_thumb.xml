@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 进度条滑块：圆形，聚焦放大加环 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape android:shape="oval">
+            <solid android:color="#FFFFFFFF" />
+            <stroke android:width="3dp" android:color="#6FA5FF" />
+            <size android:width="22dp" android:height="22dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="#FFFFFFFF" />
+            <size android:width="16dp" android:height="16dp" />
+        </shape>
+    </item>
+</selector>

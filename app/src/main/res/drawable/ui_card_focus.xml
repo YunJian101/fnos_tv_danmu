@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 焦点卡片：2dp 强调色描边 + 提亮底色（遥控器焦点唯一标识） -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/ui_card_focus" />
+            <corners android:radius="18dp" />
+            <stroke android:width="3dp" android:color="@color/ui_accent" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/ui_surface" />
+            <corners android:radius="18dp" />
+            <stroke android:width="1dp" android:color="@color/ui_line" />
+        </shape>
+    </item>
+</selector>

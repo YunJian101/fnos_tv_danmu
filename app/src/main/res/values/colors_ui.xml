@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 白天模式（默认）配色令牌：开灯 / 客厅环境 -->
+<resources>
+    <color name="ui_bg">#FFF6F7F9</color>
+    <color name="ui_surface">#FFFFFFFF</color>
+    <color name="ui_surface2">#FFECEFF4</color>
+    <color name="ui_card_focus">#FFE8EEFA</color>
+    <color name="ui_text">#FF10151C</color>
+    <color name="ui_text2">#FF5C6875</color>
+    <color name="ui_text3">#FF8A94A3</color>
+    <color name="ui_accent">#FF2563EB</color>
+    <color name="ui_accent_soft">#FFE3ECFC</color>
+    <color name="ui_accent_press">#FF1D4FC4</color>
+    <color name="ui_btn">#FF1D4E79</color>
+    <color name="ui_btn_press">#FF173D5F</color>
+    <color name="ui_line">#FFE3E7ED</color>
+    <color name="ui_scrim">#FFF6F7F9</color>
+    <color name="ui_hero_text">#FFFFFFFF</color>
+    <color name="ui_hero_text2">#FFE8EEF6</color>
+    <color name="ui_on_accent">#FFFFFFFF</color>
+    <color name="ui_player_scrim">#B3000000</color>
+    <color name="ui_chip_bg">#22FFFFFF</color>
+    <color name="ui_chip_bg_focus">#44FFFFFF</color>
+    <color name="ui_badge_bg">#FFE7F0FE</color>
+    <color name="ui_badge_text">#FF24405F</color>
+    <color name="ui_score_bg">#8C0A0F19</color>
+    <color name="ui_lib_start">#FF101728</color>
+    <color name="ui_lib_end">#FF1C2438</color>
+    <color name="ui_nav_bg">#FFFFFFFF</color>
+    <color name="ui_switch_off">#FFD5DCE6</color>
+</resources>
