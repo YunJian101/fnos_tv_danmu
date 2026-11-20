@@ -599,7 +599,7 @@ public class PlayerActivity extends AppCompatActivity {
             @Override public void onProgressChanged(SeekBar sb, int p, boolean fromUser) {
                 if (fromUser && player != null) {
                     // 立即更新 UI（时间显示）
-                    tvTime.setText(FormatUtils.fmt(p) + " / " + FormatUtils.fmt(player.getDuration()));
+                    tvTime.setText(timeText(p, player.getDuration()));
                     if (tvSeekOverlay.getVisibility() == View.VISIBLE) {
                         tvSeekOverlay.setText(FormatUtils.fmt(p) + " / " + FormatUtils.fmt(player.getDuration()));
                     }
@@ -1029,6 +1029,7 @@ public class PlayerActivity extends AppCompatActivity {
 
         player.prepare(); player.setPlayWhenReady(true);
         scheduleFirstFrameCheck();
+        startSpeedMeter();
         if (SESSION_RESUME_MS > 0) {
             final long resume = SESSION_RESUME_MS;
             SESSION_RESUME_MS = 0L;
@@ -1060,6 +1061,42 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     /** 硬解失败后切到软解，重新创建播放器 */
+    private String speedText = "";        // 实时网速文案（由统一时间文案拼接）
+    private String bufferStateText = "";   // 缓冲状态文案
+    private long lastSpeedBytes = 0L;
+    private long lastSpeedAt = 0L;
+
+    /** 每秒刷新一次网速与缓冲状态，文案交给 timeText 统一拼接 */
+    private void startSpeedMeter() {
+        handler.postDelayed(new Runnable() {
+            @Override public void run() {
+                try {
+                    if (isFinishing()) return;
+                    long now = System.currentTimeMillis();
+                    long total = OkHttpExoDataSource.TOTAL_BYTES.get();
+                    if (lastSpeedAt > 0) {
+                        long db = total - lastSpeedBytes;
+                        long dt = Math.max(1, now - lastSpeedAt);
+                        double kbps = db * 1000.0 / dt / 1024.0;
+                        speedText = kbps >= 1024
+                                ? String.format(java.util.Locale.US, "%.1f MB/s", kbps / 1024)
+                                : String.format(java.util.Locale.US, "%.0f KB/s", kbps);
+                        bufferStateText = "";
+                        if (player != null) {
+                            int st = player.getPlaybackState();
+                            if (st == Player.STATE_BUFFERING) bufferStateText = "缓冲中";
+                            else if (st == Player.STATE_ENDED) bufferStateText = "已结束";
+                        }
+                        updateTime();   // 统一出口刷新，不再直接写控件
+                    }
+                    lastSpeedBytes = total;
+                    lastSpeedAt = now;
+                } catch (Exception ignored) { }
+                handler.postDelayed(this, 1000);
+            }
+        }, 1000);
+    }
+
     /** 本次播放内切换硬/软解：与设置里的软解同一条路（扩展渲染器偏好），不写配置 */
     private void recreatePlayerForDecode(final boolean software, final long resumeMs) {
         try {
@@ -1707,6 +1744,14 @@ public class PlayerActivity extends AppCompatActivity {
         infoPanel.setOnFocusChangeListener(l);
     };
 
+    /** 唯一的时间文案出口：时间 + 网速 + 状态，避免多处覆盖导致闪烁 */
+    private String timeText(long cur, long dur) {
+        String base = FormatUtils.fmt(cur) + " / " + FormatUtils.fmt(dur);
+        if (speedText != null && !speedText.isEmpty()) base = base + " · " + speedText;
+        if (bufferStateText != null && !bufferStateText.isEmpty()) base = base + " · " + bufferStateText;
+        return base;
+    }
+
     private void updateTime() {
         if (player == null) return;
         long cur = player.getCurrentPosition(), dur = player.getDuration();
@@ -1714,7 +1759,7 @@ public class PlayerActivity extends AppCompatActivity {
         seekBar.setKeyProgressIncrement(5000); // 方向键每次 5 秒
         // 防抖期间不覆盖 UI，避免抽搐（tvTime 和 seekBar 进度由 onProgressChanged 控制）
         if (pendingSeekMs < 0) {
-            tvTime.setText(FormatUtils.fmt(cur) + " / " + FormatUtils.fmt(dur));
+            tvTime.setText(timeText(cur, dur));
             seekBar.setProgress((int) cur);
         }
         // 显示缓冲进度（灰色条）
@@ -2053,10 +2098,10 @@ public class PlayerActivity extends AppCompatActivity {
                     long dur = player != null ? player.getDuration() : 0;
                     long target = Math.max(0, Math.min(dur, cur + step));
                     // 立即更新 UI
-                    String timeText = FormatUtils.fmt(target) + " / " + FormatUtils.fmt(dur);
-                    tvSeekOverlay.setText(timeText);
+                    String overlayText = FormatUtils.fmt(target) + " / " + FormatUtils.fmt(dur);
+                    tvSeekOverlay.setText(overlayText);
                     tvSeekOverlay.setVisibility(View.VISIBLE);
-                    tvTime.setText(timeText);
+                    tvTime.setText(timeText(target, dur));
                     handler.removeCallbacks(hideSeekOverlayR);
                     handler.postDelayed(hideSeekOverlayR, 2000);
                     // 防抖：真正 seek 延迟到停止操作后

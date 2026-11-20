@@ -615,6 +615,7 @@ public class HomeActivity extends AppCompatActivity {
         View header = Ui.sectionHeader(this, title, "更多", new View.OnClickListener() {
             @Override public void onClick(View v) { openLibrary(lib); }
         });
+        long buildStart = System.nanoTime();
         LinearLayout row = Ui.row(this);
         int max = Math.min(20, items.size());
         for (int i = 0; i < max; i++) {
@@ -629,6 +630,8 @@ public class HomeActivity extends AppCompatActivity {
             lp.rightMargin = Ui.dp(this, 14);
             row.addView(card);
         }
+        android.util.Log.d("HomePerf", "rail " + title + " 建 " + max + " 张卡耗时 "
+                + ((System.nanoTime() - buildStart) / 1000000) + "ms");
         homeContainer.addView(header, Math.min(at, homeContainer.getChildCount()));
         homeContainer.addView(Ui.rail(this, row), Math.min(at + 1, homeContainer.getChildCount()));
     }

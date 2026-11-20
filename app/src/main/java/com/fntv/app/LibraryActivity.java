@@ -333,8 +333,11 @@ public class LibraryActivity extends AppCompatActivity {
     }
 
     private void gridChunked(int startRow, int rowsPerChunk) {
-        int widthDp = getResources().getConfiguration().screenWidthDp;
-        int cols = Math.max(3, widthDp / 170);
+        int widthDp = getResources().getConfiguration().screenWidthDp - 112;   // 去掉左右留白
+        int gap = 18;
+        int cardW = isLive ? 260 : 150;
+        // 列数按卡片实际宽度算，避免一行塞太多、右边被裁掉
+        int cols = Math.max(1, (widthDp + gap) / (cardW + gap));
         int start = startRow * cols;
         if (start >= items.size()) {
             if (start == 0) countView.setText("这个媒体库是空的");
@@ -364,8 +367,8 @@ public class LibraryActivity extends AppCompatActivity {
                     ((ViewGroup) card.getParent()).removeView(card);
                 }
                 LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
-                        Ui.dp(this, isLive ? 260 : 150), ViewGroup.LayoutParams.WRAP_CONTENT);
-                clp.rightMargin = Ui.dp(this, 18);
+                        0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                clp.rightMargin = (j == cols - 1) ? 0 : Ui.dp(this, 18);
                 card.setLayoutParams(clp);
                 line.addView(card);
             }

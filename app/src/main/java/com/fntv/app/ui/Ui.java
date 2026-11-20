@@ -448,47 +448,52 @@ public final class Ui {
         return posterCard(c, title, sub, imgUrl, null, null, wDp, posterHDp, onClick);
     }
 
-    /** 海报卡：2:3 圆角图 + 右上集数圆标 + 右下评分角标 + 标题/副标题 */
+    /** 海报卡：2:3 圆角图 + 右上集数圆标 + 右下评分角标 + 标题/副标题（已去掉多余容器层） */
     public static View posterCard(Context c, String title, String sub, String imgUrl,
                                   String badgeText, String scoreText,
                                   int wDp, int posterHDp, final View.OnClickListener onClick) {
-        FrameLayout card = new FrameLayout(c);
+        int pad = dp(c, 6);
+        int g8 = dp(c, 8);
+        int g4 = dp(c, 4);
+
+        LinearLayout card = new LinearLayout(c);
+        card.setOrientation(LinearLayout.VERTICAL);
         card.setFocusable(true);
         card.setFocusableInTouchMode(false);
         card.setBackgroundResource(R.drawable.ui_card_plain);
-        int pad = dp(c, 6);
         card.setPadding(pad, pad, pad, pad);
 
-        LinearLayout col = new LinearLayout(c);
-        col.setOrientation(LinearLayout.VERTICAL);
-
         FrameLayout art = new FrameLayout(c);
-        art.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(c, posterHDp)));
         art.addView(posterBox(c, imgUrl, title, INNER_RADIUS),
                 new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT));
-
 
         if (badgeText != null && !badgeText.isEmpty()) {
             FrameLayout.LayoutParams blp = new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             blp.gravity = Gravity.TOP | Gravity.RIGHT;
-            blp.topMargin = dp(c, 8);
-            blp.rightMargin = dp(c, 8);
+            blp.topMargin = g8;
+            blp.rightMargin = g8;
             art.addView(cornerBadge(c, badgeText), blp);
         }
-
-        col.addView(art);
+        if (scoreText != null && !scoreText.isEmpty()) {
+            FrameLayout.LayoutParams slp2 = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            slp2.gravity = Gravity.BOTTOM | Gravity.RIGHT;
+            slp2.rightMargin = g8;
+            slp2.bottomMargin = g8;
+            art.addView(scoreBadge(c, scoreText), slp2);
+        }
+        card.addView(art, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(c, posterHDp)));
 
         TextView t = text(c, title == null ? "" : title, 13, R.color.ui_text, true);
         t.setMaxLines(2);
         t.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        tlp.topMargin = dp(c, 8);
-        t.setLayoutParams(tlp);
-        col.addView(t);
+        tlp.topMargin = g8;
+        card.addView(t, tlp);
 
         if (sub != null && !sub.isEmpty()) {
             TextView s = text(c, sub, 11, R.color.ui_text3, false);
@@ -496,15 +501,12 @@ public final class Ui {
             s.setEllipsize(TextUtils.TruncateAt.END);
             LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            slp.topMargin = dp(c, 4);
-            s.setLayoutParams(slp);
-            col.addView(s);
+            slp.topMargin = g4;
+            card.addView(s, slp);
         }
 
-        card.addView(col, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        card.setLayoutParams(new LinearLayout.LayoutParams(dp(c, wDp), ViewGroup.LayoutParams.WRAP_CONTENT));
-
+        card.setLayoutParams(new LinearLayout.LayoutParams(dp(c, wDp),
+                ViewGroup.LayoutParams.WRAP_CONTENT));
         if (onClick != null) card.setOnClickListener(onClick);
         focusEffect(card);
         return card;
@@ -517,22 +519,21 @@ public final class Ui {
     }
 
     /** 宽幅卡：16:9 缩略图 + 左下「剩余 xx」角标 + 观看进度细条 */
+    /** 宽幅卡：16:9 缩略图 + 剩余时长角标 + 进度条 + 双行文字（已去掉多余容器层） */
     public static View wideCard(Context c, String title, String sub, String imgUrl, String badgeText,
                                 int pct, int wDp, int hDp, final View.OnClickListener onClick) {
-        FrameLayout card = new FrameLayout(c);
+        int pad = dp(c, 6);
+        int g8 = dp(c, 8);
+        int g4 = dp(c, 4);
+
+        LinearLayout card = new LinearLayout(c);
+        card.setOrientation(LinearLayout.VERTICAL);
         card.setFocusable(true);
         card.setFocusableInTouchMode(false);
         card.setBackgroundResource(R.drawable.ui_card_plain);
-        int pad = dp(c, 6);
         card.setPadding(pad, pad, pad, pad);
 
-        LinearLayout col = new LinearLayout(c);
-        col.setOrientation(LinearLayout.VERTICAL);
-
         FrameLayout thumbWrap = new FrameLayout(c);
-        // 缩略图按"实际渲染宽度"算 16:9，宽度被父容器压窄也不会变形
-        thumbWrap.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(c, hDp)));
         thumbWrap.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
             @Override public void onLayoutChange(View v, int l, int t, int r, int b, int ol, int ot, int or_, int ob) {
                 int w = r - l;
@@ -544,56 +545,58 @@ public final class Ui {
                 }
             }
         });
-
         thumbWrap.addView(posterBox(c, imgUrl, title, INNER_RADIUS),
                 new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT));
 
-
         if (badgeText != null && !badgeText.isEmpty()) {
             TextView b = text(c, badgeText, 11, R.color.ui_badge_text, false);
-            b.setTag("fntv_badge");   // 供局部更新时定位角标文字
+            b.setTag("fntv_badge");
             b.setBackgroundResource(R.drawable.ui_badge_time);
-            b.setPadding(dp(c, 10), dp(c, 5), dp(c, 10), dp(c, 5));
+            int bp = dp(c, 10);
+            b.setPadding(bp, dp(c, 5), bp, dp(c, 5));
             FrameLayout.LayoutParams blp = new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             blp.gravity = Gravity.BOTTOM | Gravity.LEFT;
-            blp.leftMargin = dp(c, 10);
-            blp.bottomMargin = dp(c, 10);
+            blp.leftMargin = bp;
+            blp.bottomMargin = bp;
             thumbWrap.addView(b, blp);
         }
 
-        LinearLayout bar = new LinearLayout(c);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
-        FrameLayout.LayoutParams blp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(c, 3));
-        blp.gravity = Gravity.BOTTOM;
-        blp.leftMargin = dp(c, 10);
-        blp.rightMargin = dp(c, 10);
-        blp.bottomMargin = dp(c, 6);
-        bar.setLayoutParams(blp);
         int p = Math.max(0, Math.min(100, pct));
-        if (p > 0) {
-            View done = new View(c);
-            done.setBackground(round(color(c, R.color.ui_accent), dp(c, 2)));
-            bar.addView(done, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, p));
+        if (p > 0 || p < 100) {
+            LinearLayout bar = new LinearLayout(c);
+            bar.setOrientation(LinearLayout.HORIZONTAL);
+            FrameLayout.LayoutParams blp2 = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(c, 3));
+            blp2.gravity = Gravity.BOTTOM;
+            blp2.leftMargin = dp(c, 10);
+            blp2.rightMargin = dp(c, 10);
+            blp2.bottomMargin = dp(c, 6);
+            bar.setLayoutParams(blp2);
+            if (p > 0) {
+                View done = new View(c);
+                done.setBackground(round(color(c, R.color.ui_accent), dp(c, 2)));
+                bar.addView(done, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, p));
+            }
+            if (p < 100) {
+                View rest = new View(c);
+                rest.setBackground(round(0x55FFFFFF, dp(c, 2)));
+                bar.addView(rest, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 100 - p));
+            }
+            thumbWrap.addView(bar);
         }
-        if (p < 100) {
-            View rest = new View(c);
-            rest.setBackground(round(0x55FFFFFF, dp(c, 2)));
-            bar.addView(rest, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 100 - p));
-        }
-        thumbWrap.addView(bar);
-        col.addView(thumbWrap);
+
+        card.addView(thumbWrap, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(c, hDp)));
 
         TextView t = text(c, title == null ? "" : title, 15, R.color.ui_text, true);
         t.setSingleLine(true);
         t.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        tlp.topMargin = dp(c, 8);
-        t.setLayoutParams(tlp);
-        col.addView(t);
+        tlp.topMargin = g8;
+        card.addView(t, tlp);
 
         if (sub != null && !sub.isEmpty()) {
             TextView s = text(c, sub, 11, R.color.ui_text2, false);
@@ -601,15 +604,12 @@ public final class Ui {
             s.setEllipsize(TextUtils.TruncateAt.END);
             LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            slp.topMargin = dp(c, 4);
-            s.setLayoutParams(slp);
-            col.addView(s);
+            slp.topMargin = g4;
+            card.addView(s, slp);
         }
 
-        card.addView(col, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        card.setLayoutParams(new LinearLayout.LayoutParams(dp(c, wDp), ViewGroup.LayoutParams.WRAP_CONTENT));
-
+        card.setLayoutParams(new LinearLayout.LayoutParams(dp(c, wDp),
+                ViewGroup.LayoutParams.WRAP_CONTENT));
         if (onClick != null) card.setOnClickListener(onClick);
         focusEffect(card);
         return card;

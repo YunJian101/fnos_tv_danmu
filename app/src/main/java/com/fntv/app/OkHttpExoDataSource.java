@@ -17,6 +17,9 @@ public class OkHttpExoDataSource extends BaseDataSource {
     private static int chunkSize = 0; // 0 = 不分块
     private static String cloudCookie = "";
     public static int lastResponseCode = 0;
+    /** 累计读取字节数，供播放界面计算实时网速 */
+    public static final java.util.concurrent.atomic.AtomicLong TOTAL_BYTES =
+            new java.util.concurrent.atomic.AtomicLong();
     public static String lastContentType = "";
     /** 最近一次请求对应的完整文件大小（来自 Content-Range 或 Content-Length，未知为 0） */
     public static long lastTotalLength = 0;
@@ -170,6 +173,7 @@ public class OkHttpExoDataSource extends BaseDataSource {
         int n = bufferedInput.read(buffer, offset, maxRead);
         if (n > 0) {
             bytesRead += n;
+            if (n > 0) TOTAL_BYTES.addAndGet(n);
             recordLoadedRange(rangePosition, rangePosition + n);
             rangePosition += n;
             bytesTransferred(n);
