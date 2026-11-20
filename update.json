@@ -1,7 +1,7 @@
 {
-    "versionCode": 212,
-    "versionName": "3.9.9",
-    "apkUrl": "https://github.com/YunJian101/fnos_tv_danmu/releases/download/v3.9.9/FNTV_release_v3.9.9.apk",
-    "changelog": "1. 修复播放界面网速显示闪烁（统一时间文案出口）\n2. 直播/分类网格按卡片实际宽度算列数，右侧不再被裁\n3. 卡片视图瘦身：每张少一层容器、按需创建角标\n4. 评分角标真正显示（此前参数未实现）",
+    "versionCode": 221,
+    "versionName": "4.0.8",
+    "apkUrl": "https://github.com/YunJian101/fnos_tv_danmu/releases/download/v4.0.8/FNTV_release_v4.0.8.apk",
+    "changelog": "1. 海报统一 2:3 比例，卡片等高（标题单行省略）\n2. 分类页按屏幕宽度自适应列数（4K 屏约 7 个一排）\n3. 卡片宽度均分可用空间，左右对称、不满行不拉伸\n4. 直播/分类网格右侧不再被裁",
     "forceUpdate": false
 }

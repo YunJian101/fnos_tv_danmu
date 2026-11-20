@@ -622,7 +622,7 @@ public class HomeActivity extends AppCompatActivity {
             final PlayListItem it = items.get(i);
             if (it == null) continue;
             View card = Ui.posterCard(this, it.getDisplayTitle(), subOf(it),
-                    Ui.posterUrl(baseUrl, it.poster), badgeOf(it), null, 150, 214,
+                    Ui.posterUrl(baseUrl, it.poster), badgeOf(it), null, 150, 225,
                     new View.OnClickListener() {
                         @Override public void onClick(View v) { openDetail(it); }
                     });

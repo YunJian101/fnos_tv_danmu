@@ -46,7 +46,8 @@ public class LibraryActivity extends AppCompatActivity {
     private TextView countView;
     private TextView sortTime;
     private TextView sortName;
-    private int sortBy = 0;          // 0=更新时间 1=名称（沿用上次）
+    private int sortBy = 0;
+    private int cardWPx = 0;          // 0=更新时间 1=名称（沿用上次）
     private final List<View> cards = new ArrayList<>();
 
     @Override
@@ -318,6 +319,12 @@ public class LibraryActivity extends AppCompatActivity {
     }
 
     private View makeCard(final PlayListItem it) {
+        int cardWdp = (int) (cardWPx / getResources().getDisplayMetrics().density + 0.5f);
+        int cardHdp = Math.max(80, cardWdp * 3 / 2);   // 2:3 海报
+        return makeCard(it, cardWdp, cardHdp);
+    }
+
+    private View makeCard(final PlayListItem it, int cardWdp, int cardHdp) {
         if (isLive) {
             return Ui.wideCard(this, it.title == null ? it.getDisplayTitle() : it.title,
                     subOf(it), Ui.posterUrl(baseUrl, it.poster), null, 0, 260, 146,
@@ -326,18 +333,24 @@ public class LibraryActivity extends AppCompatActivity {
                     });
         }
         return Ui.posterCard(this, it.getDisplayTitle(), subOf(it),
-                Ui.posterUrl(baseUrl, it.poster), null, null, 150, 214,
+                Ui.posterUrl(baseUrl, it.poster), null, null, cardWdp, cardHdp,
                 new View.OnClickListener() {
                     @Override public void onClick(View v) { openDetail(it); }
                 });
     }
 
     private void gridChunked(int startRow, int rowsPerChunk) {
-        int widthDp = getResources().getConfiguration().screenWidthDp - 112;   // 去掉左右留白
-        int gap = 18;
-        int cardW = isLive ? 260 : 150;
-        // 列数按卡片实际宽度算，避免一行塞太多、右边被裁掉
-        int cols = Math.max(1, (widthDp + gap) / (cardW + gap));
+        // 全部用像素计算，避免 dp/px 混用把列数算偏
+        float density = getResources().getDisplayMetrics().density;
+        int screenWpx = getResources().getDisplayMetrics().widthPixels;
+        int padPx = Math.round(112 * density);          // 左右留白 56dp * 2
+        int gapPx = Math.round(18 * density);           // 卡片间距 18dp
+        int availPx = Math.max(1, screenWpx - padPx);
+        // 最小可读卡宽：只决定"一行最多塞几个"，实际宽度仍由可用空间均分
+        int minCardPx = Math.round((isLive ? 300 : 135) * density);
+        int cols = Math.max(1, (availPx + gapPx) / (minCardPx + gapPx));
+        int cardWpx = Math.max(1, (availPx - gapPx * (cols - 1)) / cols);
+        cardWPx = cardWpx;
         int start = startRow * cols;
         if (start >= items.size()) {
             if (start == 0) countView.setText("这个媒体库是空的");
@@ -366,9 +379,10 @@ public class LibraryActivity extends AppCompatActivity {
                 if (card.getParent() instanceof ViewGroup) {
                     ((ViewGroup) card.getParent()).removeView(card);
                 }
+                // 宽度＝均分后的像素值；高度由卡片内部按比例（海报 2:3 / 直播 16:9）自适应
                 LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
-                        0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-                clp.rightMargin = (j == cols - 1) ? 0 : Ui.dp(this, 18);
+                        cardWpx, ViewGroup.LayoutParams.WRAP_CONTENT);
+                clp.rightMargin = (j == cols - 1) ? 0 : gapPx;
                 card.setLayoutParams(clp);
                 line.addView(card);
             }

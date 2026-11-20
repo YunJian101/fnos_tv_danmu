@@ -484,26 +484,37 @@ public final class Ui {
             slp2.bottomMargin = g8;
             art.addView(scoreBadge(c, scoreText), slp2);
         }
+        // 海报区按 2:3 跟随实际宽度自适应，宽度变大/变小都不会变形
+        art.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+            @Override public void onLayoutChange(View v, int l, int t, int r, int b,
+                                                 int ol, int ot, int or_, int ob) {
+                int w = r - l;
+                int want = (int) (w * 3f / 2f);   // 2:3 标准海报
+                if (w > 0 && Math.abs((b - t) - want) > 2) {
+                    ViewGroup.LayoutParams lp = v.getLayoutParams();
+                    lp.height = want;
+                    v.setLayoutParams(lp);
+                }
+            }
+        });
         card.addView(art, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(c, posterHDp)));
 
         TextView t = text(c, title == null ? "" : title, 13, R.color.ui_text, true);
-        t.setMaxLines(2);
+        t.setSingleLine(true);   // 标题固定一行，超出用 ... 省略 → 卡片高度统一
         t.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         tlp.topMargin = g8;
         card.addView(t, tlp);
 
-        if (sub != null && !sub.isEmpty()) {
-            TextView s = text(c, sub, 11, R.color.ui_text3, false);
-            s.setSingleLine(true);
-            s.setEllipsize(TextUtils.TruncateAt.END);
-            LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            slp.topMargin = g4;
-            card.addView(s, slp);
-        }
+        TextView s = text(c, sub == null ? "" : sub, 11, R.color.ui_text3, false);
+        s.setSingleLine(true);
+        s.setEllipsize(TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        slp.topMargin = g4;
+        card.addView(s, slp);   // 无副标题也占位，保证整卡等高
 
         card.setLayoutParams(new LinearLayout.LayoutParams(dp(c, wDp),
                 ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -592,21 +603,20 @@ public final class Ui {
 
         TextView t = text(c, title == null ? "" : title, 15, R.color.ui_text, true);
         t.setSingleLine(true);
+        t.setMinLines(1);
         t.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         tlp.topMargin = g8;
         card.addView(t, tlp);
 
-        if (sub != null && !sub.isEmpty()) {
-            TextView s = text(c, sub, 11, R.color.ui_text2, false);
-            s.setSingleLine(true);
-            s.setEllipsize(TextUtils.TruncateAt.END);
-            LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            slp.topMargin = g4;
-            card.addView(s, slp);
-        }
+        TextView s = text(c, sub == null ? "" : sub, 11, R.color.ui_text2, false);
+        s.setSingleLine(true);
+        s.setEllipsize(TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        slp.topMargin = g4;
+        card.addView(s, slp);   // 无副标题也占位
 
         card.setLayoutParams(new LinearLayout.LayoutParams(dp(c, wDp),
                 ViewGroup.LayoutParams.WRAP_CONTENT));
